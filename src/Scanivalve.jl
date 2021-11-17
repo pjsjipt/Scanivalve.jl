@@ -221,9 +221,7 @@ function readmanylines(dev, cmd, delay=0.5)
 
     
     timeout = false
-    cnt = 0
     while !timeout
-        cnt += 1
         ev = Base.Event()
         Timer(_ -> begin
                   timeout=true
