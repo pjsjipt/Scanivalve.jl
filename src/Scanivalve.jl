@@ -11,7 +11,15 @@ abstract type AbstractDAQ end
 abstract type AbstractPressureScanner <: AbstractDAQ end
 abstract type AbstractScanivalve <: AbstractPressureScanner end
 
+mutable struct DAQTask{DAQ <: AbstractDAQ}
+    daq::DAQ
+    isreading::Bool
+    nread::Int
+    buffer::Matrix{UInt8}
+end
 
+    
+    
 mutable struct DSA3217 <: AbstractScanivalve
     socket::TCPSocket
     buffer::Matrix{UInt8}
@@ -202,17 +210,44 @@ function scanconfig(dev::DSA3217; FPS=-1, PERIOD=-1, AVG=-1, TIME=-1, EU=-1,
     
 end
 
-function mylist(dev, cmd, delay=0.3)
-    timeout = false
-    f = timer -> timeout=true
+
+
+function readmanylines(dev, cmd, delay=0.5)
+
+
+    socket = dev.socket
     lst = String[]
-    println(dev.socket, cmd)
-    while timeout==false
-        t = Timer(f, delay)
+    println(socket, cmd)
+
+    
+    timeout = false
+    cnt = 0
+    while !timeout
+        cnt += 1
+        ev = Base.Event()
+        Timer(_ -> begin
+                  timeout=true
+                  notify(ev)
+              end, delay)
+        @async begin
+            line = readline(socket)
+            push!(lst, line)
+            notify(ev)
+        end
+        wait(ev)
     end
     
+    return lst
 
 end
+
+function readstatus(dev::DSA3217)
+    s = socket(dev)
+    println(s, "STATUS")
+    msg = string(Char.(read(s, 180)[81:100])...)
+    return msg
+end
+
 
 function scanpacket(dev::DSA3217)
 
