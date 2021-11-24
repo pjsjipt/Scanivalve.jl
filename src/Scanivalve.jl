@@ -168,45 +168,77 @@ checkxscantrig(dev::DSA3217, xtrig) = (xtrig != 1) ? 0 : 1
 checktime(dev::DSA3217, t) = clamp(t, 0, 2)
 checkeu(dev::DSA3217, eu) = (eu != 0) ? 1 : 0
 
+const validparameters = [:FPS, :PERIOD, :AVG, :TIME, :EU, :UNITSCAN, :XSCANTRIG]
 
-function scanconfig(dev::DSA3217; FPS=-1, PERIOD=-1, AVG=-1, TIME=-1, EU=-1,
-                    UNITSCAN="", XSCANTRIG=-1)
+function scanconfig(dev::DSA3217; kw...)
 
-    sock = socket(dev)
-    if FPS > 0
-        FPS = checkfps(dev, FPS)
-        println(sock, "SET FPS $FPS")
+    k = keys(kw)
+    cmds = String[]
+    if :FPS ∈ k
+        fps = kw[:FPS]
+        if 0 ≤ fps < 1_000_000
+            push!(cmds, "SET FPS $fps")
+        else
+            throw(DomainError(fps, "FPS outside range (0 - 1000000)"))
+        end
     end
 
-    if PERIOD >= 0
-        PERIOD = checkperiod(dev, PERIOD)
-        println(sock, "SET PERIOD $PERIOD")
+    if :PERIOD ∈ k
+        period = kw[:PERIOD]
+        if 125 ≤ period ≤ 65535
+            push!(cmds, "SET PERIOD $period")
+        else
+            throw(DomainError(period, "PERIOD outside range (126 - 65535)"))
+        end
+    end
+
+    if :AVG ∈ k
+        avg = kw[:AVG]
+        if 1 ≤ avg ≤ 240
+            push!(cmds, "SET AVG $avg")
+        else
+            throw(DomainError(avg, "AVG outside range (1 - 240)"))
+        end
+    end
+
+    if :TIME ∈ k
+        tt = kw[:AVG]
+        if 0 ≤ tt ≤ 2
+            push!(cmds, "SET TIME $tt")
+        else
+            throw(DomainError(tt, "TIME outside range (0-2)"))
+        end
     end
     
-    if AVG >= 0
-        AVG = checkavg(dev, AVG)
-        println(sock, "SET AVG $AVG")
+    if :EU ∈ k
+        eu = kw[:EU]
+        if 0 ≤ eu ≤ 1
+            push!(cmds, "SET EU $eu")
+        else
+            throw(DomainError(eu, "EU outside range (0 or 1)"))
+        end
     end
 
-    if XSCANTRIG >=0 
-        XSCANTRIG = checkxscantrig(dev, XSCANTRIG)
-        println(sock, "SET XSCANTRIG $XSCANTRIG")
+    if :UNITSCAN ∈ k # User should check manually if the correct unit was used
+        unitscan = kw[:UNITSCAN]
+        push!(cmds, "SET UNITSCAN $unitscan")
     end
 
-    if TIME >= 0
-        TIME = checktime(dev, TIME)
-        println(sock, "SET TIME $TIME")
+    if :XSCANTRIG ∈ k
+        xscantrig = kw[:EU]
+        if 0 ≤ eu ≤ 1
+            push!(cmds, "SET SCANTRIG $xscantrig")
+        else
+            throw(DomainError(xscantrig, "XSCANTRIG should be either 0 or 1"))
+        end
     end
 
-    if EU >= 0
-        EU = checkeu(dev, EU)
-        println(sock, "SET EU $EU")
-    end
+    # Send commands to Scanivalve
+    sock = socket(dev)
 
-    if length(UNITSCAN) > 0
-        println(sock, "SET UNITSCAN $UNITSCAN")
+    for c in cmds
+        println(sock, c)
     end
-
     
 end
 
