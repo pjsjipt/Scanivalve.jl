@@ -16,31 +16,48 @@ mutable struct DAQTask{DAQ <: AbstractDAQ}
     isreading::Bool
     nread::Int
     buffer::Matrix{UInt8}
+DAQTask(::Type{DAQ}, packsize=112, npacks=300_000) where {DAQ<:AbstractDAQ} =
+    DAQTask(daq, false, 0, zeros(UInt8, packsize, npacks))
+    
 end
 
-    
-    
+
+
+function daqpacketsize(::Type{DSA3217}, eu=1, time=1)
+    if time==0
+        return (eu==0) ? 72 : 104 
+    else
+        return (eu==0) ? 80 : 112
+    end
+end
+
 mutable struct DSA3217 <: AbstractScanivalve
     socket::TCPSocket
     buffer::Matrix{UInt8}
     samplesread::Int
+    daqparams::Dict{Symbol,Int32}
+    task::DAQTask{DSA3217}
 end
 
+
+    
 function DSA3217(ipaddr="191.30.80.131"; timeout=5)
 
     s = openscani(ipaddr, 23, timeout)
     buffer = zeros(Int8, 0, 0)
     println(s, "SET EU 1")
-    println(s, "SET AVG 100")
+    println(s, "SET AVG 16")
     println(s, "SET PERIOD 500")
     println(s, "SET FPS 1")
     println(s, "SET BIN 1")
     println(s, "SET XSCANTRIG 0")
     println(s, "SET UNITSCAN PA")
-    println(s, "SET TIME 0")
-    
-    
+    println(s, "SET TIME 1")
 
+    daqparams = Dict{Symbol,Int32}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0)
+    
+    dev = 
+    task = DAQTask(daq
     return DSA3217(s, buffer, 0)
      
     
