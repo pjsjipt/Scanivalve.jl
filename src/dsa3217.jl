@@ -3,17 +3,25 @@
 
 
 mutable struct DSA3217 <: AbstractScanivalve
-    socket::TCPSocket
+    ipaddr::IPv4
+    port::Int
+    #socket::TCPSocket
     daqparams::Dict{Symbol,Int32}
     task::DAQTask{DSA3217}
 end
+
+ipaddr(dev::DSA3217) = dev.ipaddr
+portnum(dev::DSA3217) = dev.port
 
 isreading(dev::DSA3217) = isreading(dev.task)
 samplesread(dev::DSA3217) = samplesread(dev.task)
 
 clearbuffer!(dev::DSA3217) = clearbuffer!(dev.task)
 
-function openscani(ipaddr="191.30.80.131", port=23, timeout=5)
+
+
+function openscani(ipaddr::IPv4, port=23,  timeout=5)
+        
     sock = TCPSocket()
     t = Timer(_ -> close(sock), timeout)
     try
@@ -26,25 +34,48 @@ function openscani(ipaddr="191.30.80.131", port=23, timeout=5)
     
     return sock
 end
+
+openscani(dev::DSA3217,  timeout=5) = openscani(ipaddr(dev), portnum(dev), timeout)
+
+function openscani(fun::Function, ipaddr::IPv4, port=23, timeout=5)
     
-function DSA3217(ipaddr="191.30.80.131"; timeout=5)
+    io = openscani(ipaddr, port, timeout)
+    try
+        fun(io)
+    finally
+        close(io)
+    end
+    
+end
 
-    s = openscani(ipaddr, 23, timeout)
-    buffer = zeros(Int8, 0, 0)
-    println(s, "SET EU 1")
-    println(s, "SET AVG 16")
-    println(s, "SET PERIOD 500")
-    println(s, "SET FPS 1")
-    println(s, "SET BIN 1")
-    println(s, "SET XSCANTRIG 0")
-    println(s, "SET UNITSCAN PA")
-    println(s, "SET TIME 1")
+openscani(fun::Function, dev::DSA3217, timeout=5) =
+    openscani(fun, ipaddr(dev), portnum(dev), timeout)
 
+
+
+
+function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000)
+    ip = IPv4(ipaddr)
+    port = 23
+
+    openscani(ip, port, timeout) do s
+        buffer = zeros(Int8, 0, 0)
+        println(s, "SET EU 1")
+        println(s, "SET AVG 16")
+        println(s, "SET PERIOD 500")
+        println(s, "SET FPS 1")
+        println(s, "SET BIN 1")
+        println(s, "SET XSCANTRIG 0")
+        println(s, "SET UNITSCAN PA")
+        println(s, "SET TIME 1")
+    end
+    
     daqparams = Dict{Symbol,Int32}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0, :EU=>1)
     
     task = DAQTask(DSA3217, 112)
     
-    return DSA3217(s, daqparams, task)
+    return DSA3217(ip, port, daqparams, task)
+    
      
     
 end
@@ -71,6 +102,7 @@ function stopscan(dev::DSA3217)
     tsk = dev.task
     
     if isreading(tsk)
+        println("STOPSCAN")
         tsk.stop = true
     end
 end
@@ -122,53 +154,45 @@ function scan!(dev::DSA3217)
     if fps == 0 # Read continously
         fps = typemax(Int32)
     end
-    sock = socket(dev)
     δt = deltat(dev) # Time per frame
-    println(sock, "SCAN")
-    
 
-    
-    for i in 1:fps
-        idx = ((i-1) % nfrs) + 1
-        read!(sock, buffer(tsk, idx))
-        tsk.idx = idx
-        tsk.nread += 1
-        if tsk.stop
-            stopped = true
-            tsk.isreading = false
-            tsk.stop = false
-            sleep(0.3)
-            nb = bytesavailable(sock)
-            read(sock, nb)
-            break
-        end
-        
-    end
-
-    tsk.isreading = false
-
-    #=
-    # If we stopped, try to read another frame
-    if stopped
-        delay = min(3*δt, 1.0)
-        ev = Base.Event()
-        Timer(_ -> begin
-                  timeout=true
-                  notify(ev)
-              end, delay)
-        frame_read = false
-        @async begin
-            i = tsk.nread + 1
+    openscani(dev) do sock
+        println(sock, "SCAN")
+        for i in 1:fps
             idx = ((i-1) % nfrs) + 1
             read!(sock, buffer(tsk, idx))
             tsk.idx = idx
             tsk.nread += 1
-            frame_read = true
-            notify(ev)
+            if tsk.stop
+                println(sock, "STOP")
+                println("STOP CMD")
+                stopped = true
+                tsk.isreading = false
+                tsk.stop = false
+                sleep(1)
+                break
+            end
+            
         end
-        wait(ev)
+
+        tsk.isreading = false
+
+        # If we stopped, try to read another frame
+        if stopped
+            delay = max(2δt, 1.0)
+            ev = Base.Event()
+            Timer(_ -> begin
+                      timeout=true
+                      notify(ev)
+                  end, delay)
+            @async begin
+                read(sock, fsize)
+                read!(sock, buffer(tsk, idx))
+                notify(ev)
+            end
+            wait(ev)
+        end
     end
-    =#
     return
 end
 
@@ -287,21 +311,22 @@ end
 import Base.close
 
 function close(scani::DSA3217)
-    s = socket(scani)
-    println(s, "SET EU 1")
-    println(s, "SET AVG 100")
-    println(s, "SET PERIOD 500")
-    println(s, "SET FPS 1")
-    println(s, "SET BIN 0")
-    println(s, "SET XSCANTRIG 0")
-    println(s, "SET UNITSCAN PA")
-    println(s, "SET TIME 0")
-    close(socket(scani))
+    openscani(dev) do s
+        println(s, "SET EU 1")
+        println(s, "SET AVG 100")
+        println(s, "SET PERIOD 500")
+        println(s, "SET FPS 1")
+        println(s, "SET BIN 0")
+        println(s, "SET XSCANTRIG 0")
+        println(s, "SET UNITSCAN PA")
+        println(s, "SET TIME 0")
+    end
+    
 end
 
 numchans(scani::DSA3217) = 16
 
-socket(scani) = scani.socket
+#socket(scani) = scani.socket
 
 function scanpacksize(dev::DSA3217, TIME=0, EU=1)
     if TIME==0
@@ -400,48 +425,46 @@ function scanconfig(dev::DSA3217; kw...)
     end
 
     # Send commands to Scanivalve
-    sock = socket(dev)
-
-    for c in cmds
-        println(sock, c)
+    openscani(dev) do sock
+        for c in cmds
+            println(sock, c)
+        end
     end
-    
 end
 
 
 
 function readmanylines(dev, cmd, delay=0.5)
 
-
-    socket = dev.socket
-    lst = String[]
-    println(socket, cmd)
-
     
-    timeout = false
-    while !timeout
-        ev = Base.Event()
-        Timer(_ -> begin
-                  timeout=true
-                  notify(ev)
-              end, delay)
-        @async begin
-            line = readline(socket)
-            push!(lst, line)
-            notify(ev)
+    lst = openscani(dev) do socket
+        lst = String[]
+        println(socket, cmd)
+        timeout = false
+        while !timeout
+            ev = Base.Event()
+            Timer(_ -> begin
+                      timeout=true
+                      notify(ev)
+                  end, delay)
+            @async begin
+                line = readline(socket)
+                push!(lst, line)
+                notify(ev)
+            end
+            wait(ev)
         end
-        wait(ev)
     end
     
     return lst
-
+        
 end
 
 function readstatus(dev::DSA3217)
-    s = socket(dev)
-    println(s, "STATUS")
-    msg = string(Char.(read(s, 180)[81:100])...)
-    return msg
+    openscani(dev) do s
+        println(s, "STATUS")
+        string(Char.(read(s, 180)[81:100])...)
+    end
 end
 
 
@@ -450,9 +473,6 @@ end
 
 
     
-function scan2time(dev, buf, info)
-end
-
     
     
 function readnlines(s, n=1)
@@ -472,10 +492,11 @@ function parse_dsa_set(lst)
     return p
 end
 
-function listany(scani::AbstractScanivalve, cmd, nparams)
-    println(socket(scani), "LIST $cmd\r")
-    lst = readnlines(socket(scani), nparams)
-    return lst
+function listany(dev::DSA3217, cmd, nparams)
+    openscani(dev) do sock
+        println(sock, "LIST $cmd\r")
+        readnlines(sock, nparams)
+    end
 end
 
 
@@ -497,11 +518,17 @@ end
 
 listscan(scani::DSA3217) = listanydict(scani, "S", 14)
 listident(scani::DSA3217) = listanydict(scani, "I", 4)
-listzero(scani::AbstractScanivalve) = listanyval(scani, "Z", numchans(scani), Int)
-listoffset(scani::AbstractScanivalve) = listanyval(scani, "O", numchans(scani), Float64)
-listdelta(scani::AbstractScanivalve) = listanyval(scani, "O", numchans(scani), Float64)
-listgain(scani::AbstractScanivalve) = listanyval(scani, "G", numchans(scani), Float64)
-setparam(scani, param, val) = println(socket(scani), "SET $param $val\r")
+listzero(scani::DSA3217) = listanyval(scani, "Z", numchans(scani), Int)
+listoffset(scani::DSA3217) = listanyval(scani, "O", numchans(scani), Float64)
+listdelta(scani::DSA3217) = listanyval(scani, "O", numchans(scani), Float64)
+listgain(scani::DSA3217) = listanyval(scani, "G", numchans(scani), Float64)
+
+
+setparam(scani, param, val) =
+    openscani(scani) do sock
+        println(sock, "SET $param $val\r")
+    end
+
 
 
 
