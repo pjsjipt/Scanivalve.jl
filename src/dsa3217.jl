@@ -101,17 +101,22 @@ function resizebuffer!(dev::DSA3217)
 end
 
     
-        
     
 
 function scan!(dev::DSA3217)
-    
-    resizebuffer!(dev)
+
     tsk = dev.task
+    isreading(tsk) && error("DSA is already reading!")
+    tsk.isreading = true
+    tsk.nread = 0
+    tsk.idx = 0
+    tsk.stop = false
+    stopped = false
+
+    resizebuffer!(dev)
     fsize = framesize(tsk)
     nfrs = numframes(tsk)
     
-    isreading(tsk) && error("DSA is already reading!")
     
     fps = daqparam(dev, :FPS)
     if fps == 0 # Read continously
@@ -121,11 +126,8 @@ function scan!(dev::DSA3217)
     δt = deltat(dev) # Time per frame
     println(sock, "SCAN")
     
-    tsk.isreading = true
-    tsk.nread = 0
-    tsk.idx = 0
+
     
-    stopped = false
     for i in 1:fps
         idx = ((i-1) % nfrs) + 1
         read!(sock, buffer(tsk, idx))
@@ -134,14 +136,21 @@ function scan!(dev::DSA3217)
         if tsk.stop
             stopped = true
             tsk.isreading = false
+            tsk.stop = false
+            sleep(0.3)
+            nb = bytesavailable(sock)
+            read(sock, nb)
             break
         end
         
     end
+
     tsk.isreading = false
+
+    #=
     # If we stopped, try to read another frame
     if stopped
-        delay = minimum(3*δt, 1.0)
+        delay = min(3*δt, 1.0)
         ev = Base.Event()
         Timer(_ -> begin
                   timeout=true
@@ -159,7 +168,8 @@ function scan!(dev::DSA3217)
         end
         wait(ev)
     end
-    
+    =#
+    return
 end
 
 
@@ -173,7 +183,6 @@ function daqstart(dev::DSA3217, usethread=false)
     else
         tsk = @async scan!(dev)
     end
-
     return tsk
 end
 
@@ -184,19 +193,21 @@ function readpressure(dev::DSA3217)
     nsamples = samplesread(dev)
     buflen = numframes(tsk)
     idx = tsk.idx
-
+    
+    δt = getdaqtime(dev, nsamples)
+    
     if daqparam(dev, :EU) > 0
         press = read_eu_press(tsk.buffer, buflen, nsamples, idx)
     else
         error("Reading data without engineering units (EU=1) not implemented yet!")
     end
-    return press
+    return press, 1.0/δt
 end
 
     
 function daqread(dev::DSA3217)
-
     # Wait for data
+    sleep(0.1) 
     while isreading(dev)
         sleep(0.1)
     end
@@ -221,6 +232,33 @@ function read_eu_press(buf, buflen, nsamples, idxlast)
         return hcat(press1, press2)
     end
 end
+
+function getdaqtime(dev, nfr)
+    buf = dev.task.buffer
+    b = buf[1,1] # Identify the packet
+
+    # Sampling time from scan configuration and fallback value
+    δt₀ = daqparam(dev, :AVG) * daqparam(dev, :PERIOD)*1e-6 * 16
+    btype = daqparam(dev, :TIME)
+    if b == 0x04 || b == 0x05 || nfr==1 # No time
+        # Calculate from scan configuration
+        return δt₀
+    else
+        if b == 0x07  # EU with time
+            bt1 = reinterpret(Int32, buf[105:108,1])[1]
+            bt2 = reinterpret(Int32, buf[105:108,nfr])[1]
+        elseif b == 0x06
+            bt1 = reinterpret(Int32, buf[73:76,1])[1]
+            bt2 = reinterpret(Int32, buf[73:76,nfr])[1]
+        else # This shouldn't happen! Fallback
+            return δt₀
+        end
+        ft = (btype==1) ? 1e6 : 1e3
+        return  (bt2 - bt1) / (ft*(nfr-1))
+    end
+                            
+end
+
 
         
 
