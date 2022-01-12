@@ -5,18 +5,18 @@
 mutable struct DSA3217 <: AbstractScanivalve
     ipaddr::IPv4
     port::Int
-    #socket::TCPSocket
-    daqparams::Dict{Symbol,Int32}
-    task::DAQTask{DSA3217}
+    params::Dict{Symbol,Any}
+    buffer::CircMatBuffer{UInt8}
+    task::DAQTask
+    chans::Vector{Int}
 end
 
 ipaddr(dev::DSA3217) = dev.ipaddr
 portnum(dev::DSA3217) = dev.port
 
-isreading(dev::DSA3217) = isreading(dev.task)
-samplesread(dev::DSA3217) = samplesread(dev.task)
+AbstractDAQ.isreading(dev::DSA3217) = isreading(dev.task)
+AbstractDAQ.samplesread(dev::DSA3217) = samplesread(dev.task)
 
-clearbuffer!(dev::DSA3217) = clearbuffer!(dev.task)
 
 
 
@@ -70,11 +70,11 @@ function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000)
         println(s, "SET TIME 1")
     end
     
-    daqparams = Dict{Symbol,Int32}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0, :EU=>1)
+    params = Dict{Symbol,Any}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0, :EU=>1, :UNITSCAN=>"PA")
     
-    task = DAQTask(DSA3217, 112)
-    
-    return DSA3217(ip, port, daqparams, task)
+    task = DAQTask()
+    buf = CircMatBuffer{UInt8}(112, buflen)
+    return DSA3217(ip, port, params, buf, task, collect(1:16))
     
      
     
@@ -89,7 +89,7 @@ function daqpacketsize(::Type{DSA3217}, eu=1, time=1)
     end
 end
 
-daqparam(dev, param) = dev.daqparams[param]
+daqparam(dev, param) = dev.params[param]
 
 framesize(dev::DSA3217) = daqpacketsize(DSA3217, daqparam(dev,:EU), daqparam(dev,:TIME))
 
@@ -102,76 +102,60 @@ function stopscan(dev::DSA3217)
     tsk = dev.task
     
     if isreading(tsk)
-        println("STOPSCAN")
         tsk.stop = true
     end
 end
 
-function resizebuffer!(dev::DSA3217)
-    tsk = dev.task
-    fsize = framesize(tsk)
-    nfrs = numframes(tsk)
-
-    fps = daqparam(dev, :FPS)
-    fsize1 = framesize(dev)
-
-    should_resize = false
-
-    if fsize1 != fsize
-        should_resize = true
-    end
-
-    if nfrs < fps
-        should_resize = true
-    end
-
-    if should_resize
-        fps  = (fps==0) ? 300_000 : fps
-        resizebuffer!(tsk, fsize1, fps)
-    end
-    return
-end
-
-    
     
 
 function scan!(dev::DSA3217)
 
     tsk = dev.task
     isreading(tsk) && error("DSA is already reading!")
-    tsk.isreading = true
-    tsk.nread = 0
-    tsk.idx = 0
-    tsk.stop = false
-    stopped = false
 
-    resizebuffer!(dev)
-    fsize = framesize(tsk)
-    nfrs = numframes(tsk)
-    
-    
+    cleartask!(tsk)
+
+    buf = dev.buffer
     fps = daqparam(dev, :FPS)
-    if fps == 0 # Read continously
-        fps = typemax(Int32)
+    if fps > capacity(buf) 
+        resize!(buf, fps)
     end
+    empty!(buf)
+    
+    fsize = framesize(dev)
+    nfrs = length(buf)
+    
+    if fps == 0 # Read continously
+        fps1 = typemax(Int32)
+    else
+        fps1 = fps
+    end
+    
     δt = deltat(dev) # Time per frame
-
+    stopped = false
+    
     openscani(dev) do sock
         println(sock, "SCAN")
-        for i in 1:fps
-            idx = ((i-1) % nfrs) + 1
-            read!(sock, buffer(tsk, idx))
-            tsk.idx = idx
-            tsk.nread += 1
+        tsk.isreading = true
+        t0 = time_ns()
+        b = nextbuffer(buf)
+        readbytes!(sock, b, fsize)
+        t1 = time_ns()
+        settiming!(tsk, t0, t1, 1)
+        tsk.nread += 1
+        for i in 2:fps1
             if tsk.stop
-                println(sock, "STOP")
-                println("STOP CMD")
                 stopped = true
-                tsk.isreading = false
-                tsk.stop = false
-                sleep(1)
+                println(sock, "STOP")
+                sleep(0.5)
                 break
             end
+            
+            b = nextbuffer(buf)
+            readbytes!(sock, b, fsize)
+            tn = time_ns()
+            tsk.nread += 1
+            settiming!(tsk, t1, tn, i-1)
             
         end
 
@@ -196,8 +180,63 @@ function scan!(dev::DSA3217)
     return
 end
 
+const validunits = ["ATM", "BAR", "CMHG", "CMH2O", "DECIBAR", "FTH2O", "GCM2",
+                    "INHG", "INH2O", "KPA", "KGCM2", "KGM2", "KIPIN2", "KNM2",
+                    "MH2O", "MMHG", "MPA", "NCM2", "MBAR", "OZFT2", "OZIN2",
+                    "PA", "PSF", "NM2", "PSI", "TORR"]
 
-function daqstart(dev::DSA3217, usethread=false)
+function AbstractDAQ.daqconfig(dev::DSA3217; kw...)
+    cmds = String[]
+    
+    if haskey(kw, :avg)
+        avg = round(Int, kw[:avg])
+        daqconfigdev(dev, AVG=avg)
+    else
+        avg = dev.params[:AVG]
+    end
+    
+
+    if haskey(kw, :freq) && haskey(kw, :dt)
+        error("Parameters `freq` and `dt` can not be specified simultaneously!")
+    elseif haskey(kw, :freq) || haskey(kw, :dt)
+        if haskey(kw, :freq)
+            freq = kw[:freq]
+            period = round(Int, 1.0 / (freq*16e-6*avg))
+        else
+            dt = kw[:dt]
+            period = round(Int, dt / (16e-6*avg))
+        end
+        daqconfigdev(dev, PERIOD=period)
+    else
+        period = dev.params[:PERIOD]
+    end
+    
+    if haskey(kw, :nsamples) && haskey(kw, :time)
+        error("Parameters `nsamples` and `time` can not be specified simultaneously!")
+    elseif haskey(kw, :nsamples) || haskey(kw, :time)
+        if haskey(kw, :nsamples)
+            nsamples = kw[:nsamples]
+        else
+            tt = kw[:time]
+            dt = period * 16e-6 * avg
+            nsamples = round(Int, tt / dt)
+        end
+        daqconfigdev(dev, FPS=nsamples)
+    else
+        nsamples = dev.params[:FPS]
+    end
+        
+    if haskey(kw, :trigger)
+        trigger = kw[:trigger]
+        daqconfigdev(dev, XSCANTRIG=trigger)
+    end
+    
+
+end
+
+
+
+function AbstractDAQ.daqstart(dev::DSA3217, usethread=false)
     if isreading(dev)
         error("Scanivalve already reading!")
     end
@@ -207,21 +246,44 @@ function daqstart(dev::DSA3217, usethread=false)
     else
         tsk = @async scan!(dev)
     end
+    dev.task.task = tsk
     return tsk
 end
+
+function AbstractDAQ.daqaddinput(dev::DSA3217, chans=1:16)
+
+    cmin, cmax = extrema(chans)
+    if cmin < 1 || cmax > 16
+        throw(ArgumentError("Only channels 1-16 are available to DSA3217"))
+    end
+
+    dev.chans = collect(chans)
+    
+end
+
+function AbstractDAQ.daqstop(dev::DSA3217)
+
+    tsk = dev.task.task
+    if !istaskdone(tsk) && istaskstarted(tsk)
+        stopscan(dev)
+        wait(tsk)
+    end
+    dev.task.stop = false
+    dev.task.isreading = false
+    
+end
+
 
 function readpressure(dev::DSA3217)
     isreading(dev) && error("Scanivalve still acquiring data!")
 
     tsk = dev.task
-    nsamples = samplesread(dev)
-    buflen = numframes(tsk)
-    idx = tsk.idx
-    
+    buf = dev.buffer
+    nsamples = length(buf)
     δt = getdaqtime(dev, nsamples)
     
     if daqparam(dev, :EU) > 0
-        press = read_eu_press(tsk.buffer, buflen, nsamples, idx)
+        press = read_eu_press(buf, dev.chans)
     else
         error("Reading data without engineering units (EU=1) not implemented yet!")
     end
@@ -229,36 +291,47 @@ function readpressure(dev::DSA3217)
 end
 
     
-function daqread(dev::DSA3217)
-    # Wait for data
-    sleep(0.1) 
-    while isreading(dev)
+function AbstractDAQ.daqread(dev::DSA3217)
+
+    # Check if the reading is continous
+    if daqparam(dev, :FPS) == 0
+        # Stop reading!
+        daqstop(dev)
         sleep(0.1)
     end
-
+    # Wait for task to end
+    if !istaskdone(dev.task.task) && istaskstarted(dev.task.task)
+        wait(dev.task.task)
+        sleep(0.1)
+    end
+    
     # Get the data:
     return readpressure(dev)                      
 end
 
-function daqacquire(dev::DSA3217)
+function AbstractDAQ.daqacquire(dev::DSA3217)
     scan!(dev)
     return readpressure(dev)
 end
 
 
-function read_eu_press(buf, buflen, nsamples, idxlast)
-    if nsamples <= buflen # All buffer was not overwritten
-        return reinterpret(Float32, buf[9:72, 1:nsamples])
-    else # Buffer overwritten
-        # Get the older data (after idxlast)
-        press1 = reinterpret(Float32, buf[9:72, (idx+1):buflen])
-        press2 = reinterpret(Float32, buf[9:72, 1:idx])
-        return hcat(press1, press2)
+function read_eu_press(buf, chans)
+
+    nt = length(buf)
+    nch = length(chans)
+    P = zeros(Float32, nch, nt)
+
+    for i in 1:nt
+        p1 = reinterpret(Float32, view(buf[i], 9:72))
+        for k in 1:nch
+            P[k,i] = p1[chans[k]]
+        end
     end
+    return P
 end
 
 function getdaqtime(dev, nfr)
-    buf = dev.task.buffer
+    buf = dev.buffer
     b = buf[1,1] # Identify the packet
 
     # Sampling time from scan configuration and fallback value
@@ -354,7 +427,8 @@ checkeu(dev::DSA3217, eu) = (eu != 0) ? 1 : 0
 
 const validparameters = [:FPS, :PERIOD, :AVG, :TIME, :EU, :UNITSCAN, :XSCANTRIG]
 
-function scanconfig(dev::DSA3217; kw...)
+    
+function AbstractDAQ.daqconfigdev(dev::DSA3217; kw...)
 
     k = keys(kw)
     cmds = String[]
@@ -362,7 +436,7 @@ function scanconfig(dev::DSA3217; kw...)
         fps = kw[:FPS]
         if 0 ≤ fps < 1_000_000
             push!(cmds, "SET FPS $fps")
-            dev.daqparams[:FPS] = fps
+            dev.params[:FPS] = fps
         else
             throw(DomainError(fps, "FPS outside range (0 - 1000000)"))
         end
@@ -372,7 +446,7 @@ function scanconfig(dev::DSA3217; kw...)
         period = kw[:PERIOD]
         if 125 ≤ period ≤ 65535
             push!(cmds, "SET PERIOD $period")
-            dev.daqparams[:PERIOD] = period
+            dev.params[:PERIOD] = period
         else
             throw(DomainError(period, "PERIOD outside range (126 - 65535)"))
         end
@@ -382,7 +456,7 @@ function scanconfig(dev::DSA3217; kw...)
         avg = kw[:AVG]
         if 1 ≤ avg ≤ 240
             push!(cmds, "SET AVG $avg")
-            dev.daqparams[:AVG] = avg
+            dev.params[:AVG] = avg
         else
             throw(DomainError(avg, "AVG outside range (1 - 240)"))
         end
@@ -392,7 +466,7 @@ function scanconfig(dev::DSA3217; kw...)
         tt = kw[:TIME]
         if 0 ≤ tt ≤ 2
             push!(cmds, "SET TIME $tt")
-            dev.daqparams[:TIME] = tt
+            dev.params[:TIME] = tt
         else
             throw(DomainError(tt, "TIME outside range (0-2)"))
         end
@@ -402,7 +476,7 @@ function scanconfig(dev::DSA3217; kw...)
         eu = kw[:EU]
         if 0 ≤ eu ≤ 1
             push!(cmds, "SET EU $eu")
-            dev.daqparams[:EU] = eu
+            dev.params[:EU] = eu
         else
             throw(DomainError(eu, "EU outside range (0 or 1)"))
         end
@@ -410,15 +484,18 @@ function scanconfig(dev::DSA3217; kw...)
 
     if :UNITSCAN ∈ k # User should check manually if the correct unit was used
         unitscan = kw[:UNITSCAN]
-        push!(cmds, "SET UNITSCAN $unitscan")
-        
+        if unitscan ∈ validunits
+            push!(cmds, "SET UNITSCAN $unitscan")
+        else
+            throw(DomainError(unitscan, "Invalid unit!"))
+        end
     end
 
     if :XSCANTRIG ∈ k
         xscantrig = kw[:EU]
         if 0 ≤ eu ≤ 1
             push!(cmds, "SET SCANTRIG $xscantrig")
-            dev.daqparams[:XSCANTRIG] = xscantrig
+            dev.params[:XSCANTRIG] = xscantrig
         else
             throw(DomainError(xscantrig, "XSCANTRIG should be either 0 or 1"))
         end

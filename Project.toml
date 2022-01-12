@@ -4,6 +4,7 @@ authors = ["Paulo José Saiz Jabardo <pjabardo@gmail.com> and contributors"]
 version = "0.1.0"
 
 [deps]
+AbstractDAQ = "be525c41-cbe2-4c7e-9446-a8e259030c72"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
