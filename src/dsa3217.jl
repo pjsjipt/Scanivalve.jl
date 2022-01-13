@@ -9,6 +9,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     buffer::CircMatBuffer{UInt8}
     task::DAQTask
     chans::Vector{Int}
+    conf::DAQConfig
 end
 
 ipaddr(dev::DSA3217) = dev.ipaddr
@@ -54,7 +55,8 @@ openscani(fun::Function, dev::DSA3217, timeout=5) =
 
 
 
-function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000)
+function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000,
+                 tag="", sn="")
     ip = IPv4(ipaddr)
     port = 23
 
@@ -71,10 +73,17 @@ function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000)
     end
     
     params = Dict{Symbol,Any}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0, :EU=>1, :UNITSCAN=>"PA")
+
+    ipars = Dict{String,Int}("FPS"=>1, "AVG"=>16, "PERIOD"=>500, "TIME"=>1,
+                             "EU"=>1, "XSCANTRIG"=>0)
+    spars = Dict{String,String}("UNITSCAN"=>"PA")
+    fpars = Dict{String,Float64}()
     
+    conf = DAQConfig(ipars, fpars, spars,
+                   devname="Scanivalve", ip=ipaddr, model="DSA3217", sn=sn,tag=tag)
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
-    return DSA3217(ip, port, params, buf, task, collect(1:16))
+    return DSA3217(ip, port, params, buf, task, collect(1:16), conf)
     
      
     
@@ -506,10 +515,36 @@ function AbstractDAQ.daqconfigdev(dev::DSA3217; kw...)
         for c in cmds
             println(sock, c)
         end
+
+        # Update conf field:
+        updateconf!(dev::DSA3217)
     end
 end
 
+function updateconf!(dev::DSA3217)
+    p = dev.params
+    ipars = dev.conf.ipars
+    spars = dev.conf.spars
 
+    ipars["FPS"] = p[:FPS]
+    ipars["AVG"] = p[:AVG]
+    ipars["PERIOD"] = p[:PERIOD]
+    ipars["TIME"] = p[:TIME]
+    ipars["XSCANTRIG"] = p[:XSCANTRIG]
+    ipars["EU"] = p[:EU]
+
+    spars["UNITSCAN"] = p[:UNITSCAN]
+
+    return
+    
+end
+
+function AbstractDAQ.daqzero(dev::DSA3217; time=15)
+    openscani(dev) do io
+        println(io, "CALZ")
+        sleep(time)
+    end
+end
 
 function readmanylines(dev, cmd, delay=0.5)
 

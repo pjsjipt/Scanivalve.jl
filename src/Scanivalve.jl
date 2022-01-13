@@ -8,6 +8,7 @@ export close, numchans, listscan, listzero, listgain, listoffset, listdelta
 export scan!, stopscan, isreading, samplesread, scanconfig, daqparam
 export clearbuffer!
 export daqread, daqstart, daqacquire, daqconfig, daqconfigdev, daqstop, daqaddinput
+export daqzero
 
 
 abstract type AbstractScanivalve <: AbstractPressureScanner end
