@@ -408,6 +408,8 @@ function close(scani::DSA3217)
 end
 
 numchans(scani::DSA3217) = 16
+AbstractDAQ.numchannels(scani::DSA3217) = length(scani.chans)
+AbstractDAQ.daqchannels(scani::DSA3217) = scani.chans
 
 #socket(scani) = scani.socket
 
