@@ -9,6 +9,8 @@ export scan!, stopscan, isreading, samplesread, scanconfig, daqparam
 export clearbuffer!
 export daqread, daqstart, daqacquire, daqconfig, daqconfigdev, daqstop, daqaddinput
 export daqzero
+export DAQConfig, iparameters, fparameters, sparameters, daqdevname
+export daqdevip, daqdevmodel, daqdevserialnum, daqdevtag
 
 
 abstract type AbstractScanivalve <: AbstractPressureScanner end

@@ -55,8 +55,9 @@ openscani(fun::Function, dev::DSA3217, timeout=5) =
 
 
 
-function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000,
-                 tag="", sn="")
+function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
+                 timeout=5, buflen=300_000, tag="", sn="")
+    
     ip = IPv4(ipaddr)
     port = 23
 
@@ -80,7 +81,7 @@ function DSA3217(ipaddr="191.30.80.131"; timeout=5, buflen=300_000,
     fpars = Dict{String,Float64}()
     
     conf = DAQConfig(ipars, fpars, spars,
-                   devname="Scanivalve", ip=ipaddr, model="DSA3217", sn=sn,tag=tag)
+                   devname=devname, ip=ipaddr, model="DSA3217", sn=sn,tag=tag)
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     return DSA3217(ip, port, params, buf, task, collect(1:16), conf)
