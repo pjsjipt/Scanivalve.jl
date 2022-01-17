@@ -15,10 +15,15 @@ end
 ipaddr(dev::DSA3217) = dev.ipaddr
 portnum(dev::DSA3217) = dev.port
 
-AbstractDAQ.isreading(dev::DSA3217) = isreading(dev.task)
-AbstractDAQ.samplesread(dev::DSA3217) = samplesread(dev.task)
+AbstractDAQs.isreading(dev::DSA3217) = isreading(dev.task)
+AbstractDAQs.samplesread(dev::DSA3217) = samplesread(dev.task)
 
 
+function Base.show(io::IO, dev::DSA3217)
+    println(io, "Scanivalve DSA3217")
+    println(io, "    Dev Name: $(daqdevname(dev))")
+    println(io, "    IP: $(string(dev.ipaddr))")
+end
 
 
 function openscani(ipaddr::IPv4, port=23,  timeout=5)
@@ -195,7 +200,7 @@ const validunits = ["ATM", "BAR", "CMHG", "CMH2O", "DECIBAR", "FTH2O", "GCM2",
                     "MH2O", "MMHG", "MPA", "NCM2", "MBAR", "OZFT2", "OZIN2",
                     "PA", "PSF", "NM2", "PSI", "TORR"]
 
-function AbstractDAQ.daqconfig(dev::DSA3217; kw...)
+function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
     cmds = String[]
     
     if haskey(kw, :avg)
@@ -246,7 +251,7 @@ end
 
 
 
-function AbstractDAQ.daqstart(dev::DSA3217, usethread=false)
+function AbstractDAQs.daqstart(dev::DSA3217, usethread=false)
     if isreading(dev)
         error("Scanivalve already reading!")
     end
@@ -260,7 +265,7 @@ function AbstractDAQ.daqstart(dev::DSA3217, usethread=false)
     return tsk
 end
 
-function AbstractDAQ.daqaddinput(dev::DSA3217, chans=1:16)
+function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16)
 
     cmin, cmax = extrema(chans)
     if cmin < 1 || cmax > 16
@@ -271,7 +276,7 @@ function AbstractDAQ.daqaddinput(dev::DSA3217, chans=1:16)
     
 end
 
-function AbstractDAQ.daqstop(dev::DSA3217)
+function AbstractDAQs.daqstop(dev::DSA3217)
 
     tsk = dev.task.task
     if !istaskdone(tsk) && istaskstarted(tsk)
@@ -301,7 +306,7 @@ function readpressure(dev::DSA3217)
 end
 
     
-function AbstractDAQ.daqread(dev::DSA3217)
+function AbstractDAQs.daqread(dev::DSA3217)
 
     # Check if the reading is continous
     if daqparam(dev, :FPS) == 0
@@ -319,7 +324,7 @@ function AbstractDAQ.daqread(dev::DSA3217)
     return readpressure(dev)                      
 end
 
-function AbstractDAQ.daqacquire(dev::DSA3217)
+function AbstractDAQs.daqacquire(dev::DSA3217)
     scan!(dev)
     return readpressure(dev)
 end
@@ -408,8 +413,8 @@ function close(scani::DSA3217)
 end
 
 numchans(scani::DSA3217) = 16
-AbstractDAQ.numchannels(scani::DSA3217) = length(scani.chans)
-AbstractDAQ.daqchannels(scani::DSA3217) = scani.chans
+AbstractDAQs.numchannels(scani::DSA3217) = length(scani.chans)
+AbstractDAQs.daqchannels(scani::DSA3217) = scani.chans
 
 #socket(scani) = scani.socket
 
@@ -440,7 +445,7 @@ checkeu(dev::DSA3217, eu) = (eu != 0) ? 1 : 0
 const validparameters = [:FPS, :PERIOD, :AVG, :TIME, :EU, :UNITSCAN, :XSCANTRIG]
 
     
-function AbstractDAQ.daqconfigdev(dev::DSA3217; kw...)
+function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
 
     k = keys(kw)
     cmds = String[]
@@ -542,7 +547,7 @@ function updateconf!(dev::DSA3217)
     
 end
 
-function AbstractDAQ.daqzero(dev::DSA3217; time=15)
+function AbstractDAQs.daqzero(dev::DSA3217; time=15)
     openscani(dev) do io
         println(io, "CALZ")
         sleep(time)
