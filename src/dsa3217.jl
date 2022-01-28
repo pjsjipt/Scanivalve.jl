@@ -211,12 +211,12 @@ function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
     end
     
 
-    if haskey(kw, :freq) && haskey(kw, :dt)
-        error("Parameters `freq` and `dt` can not be specified simultaneously!")
-    elseif haskey(kw, :freq) || haskey(kw, :dt)
-        if haskey(kw, :freq)
-            freq = kw[:freq]
-            period = round(Int, 1.0 / (freq*16e-6*avg))
+    if haskey(kw, :rate) && haskey(kw, :dt)
+        error("Parameters `rate` and `dt` can not be specified simultaneously!")
+    elseif haskey(kw, :rate) || haskey(kw, :dt)
+        if haskey(kw, :rate)
+            rate = kw[:rate]
+            period = round(Int, 1.0 / (rate*16e-6*avg))
         else
             dt = kw[:dt]
             period = round(Int, dt / (16e-6*avg))
