@@ -9,6 +9,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     buffer::CircMatBuffer{UInt8}
     task::DAQTask
     chans::Vector{Int}
+    channames::Vector{String}
     conf::DAQConfig
 end
 
@@ -18,6 +19,7 @@ portnum(dev::DSA3217) = dev.port
 AbstractDAQs.isreading(dev::DSA3217) = isreading(dev.task)
 AbstractDAQs.samplesread(dev::DSA3217) = samplesread(dev.task)
 
+numstring(x::Integer, n=2) = string(10^n+x)[2:end]
 
 function Base.show(io::IO, dev::DSA3217)
     println(io, "Scanivalve DSA3217")
@@ -89,7 +91,8 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
                    devname=devname, ip=ipaddr, model="DSA3217", sn=sn,tag=tag)
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
-    return DSA3217(ip, port, params, buf, task, collect(1:16), conf)
+    chn = "P" .* numstring.(1:16)
+    return DSA3217(ip, port, params, buf, task, collect(1:16), chn, conf)
     
      
     
@@ -265,15 +268,25 @@ function AbstractDAQs.daqstart(dev::DSA3217, usethread=false)
     return tsk
 end
 
-function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16)
+function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; channames="P")
 
     cmin, cmax = extrema(chans)
     if cmin < 1 || cmax > 16
         throw(ArgumentError("Only channels 1-16 are available to DSA3217"))
     end
 
+    if isa(channames, AbstractString) || isa(channames, Symbol)
+        chn = string(channames) .* numstring.(chans)
+    elseif length(channames) == length(chans)
+        chn = string.(channames) .* string.(chans)
+    else
+        throw(ArgumentError("Argument `channames` should have length 1 or the length of `chans`"))
+    end
+
     dev.chans = collect(chans)
-    
+    dev.channames = chn
+
+    return
 end
 
 function AbstractDAQs.daqstop(dev::DSA3217)
@@ -414,7 +427,7 @@ end
 
 numchans(scani::DSA3217) = 16
 AbstractDAQs.numchannels(scani::DSA3217) = length(scani.chans)
-AbstractDAQs.daqchannels(scani::DSA3217) = scani.chans
+AbstractDAQs.daqchannels(scani::DSA3217) = scani.channames
 
 #socket(scani) = scani.socket
 
@@ -557,8 +570,8 @@ end
 function readmanylines(dev, cmd, delay=0.5)
 
     
-    lst = openscani(dev) do socket
-        lst = String[]
+    lst = String[]
+    openscani(dev) do socket
         println(socket, cmd)
         timeout = false
         while !timeout
