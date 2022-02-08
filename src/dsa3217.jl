@@ -15,6 +15,8 @@ end
 
 "Returns the IP address of the device"
 ipaddr(dev::DSA3217) = dev.ipaddr
+
+"Returns the port number used for TCP/IP communication"
 portnum(dev::DSA3217) = dev.port
 
 AbstractDAQs.isreading(dev::DSA3217) = isreading(dev.task)
