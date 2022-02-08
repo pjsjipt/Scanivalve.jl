@@ -13,6 +13,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     conf::DAQConfig
 end
 
+"Returns the IP address of the device"
 ipaddr(dev::DSA3217) = dev.ipaddr
 portnum(dev::DSA3217) = dev.port
 
