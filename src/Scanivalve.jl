@@ -9,7 +9,7 @@ export scan!, stopscan, isreading, samplesread, scanconfig, daqparam
 export clearbuffer!
 export daqread, daqstart, daqacquire, daqconfig, daqconfigdev
 export daqzero, daqstop, daqaddinput, numchannels, daqchannels
-export DAQConfig, iparameters, fparameters, sparameters, daqdevname
+export DAQConfig, iparameters, fparameters, sparameters, devname
 export daqdevip, daqdevmodel, daqdevserialnum, daqdevtag
 
 

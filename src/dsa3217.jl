@@ -3,6 +3,7 @@
 
 
 mutable struct DSA3217 <: AbstractScanivalve
+    devname::String
     ipaddr::IPv4
     port::Int
     params::Dict{Symbol,Any}
@@ -26,7 +27,7 @@ numstring(x::Integer, n=2) = string(10^n+x)[2:end]
 
 function Base.show(io::IO, dev::DSA3217)
     println(io, "Scanivalve DSA3217")
-    println(io, "    Dev Name: $(daqdevname(dev))")
+    println(io, "    Dev Name: $(devname(dev))")
     println(io, "    IP: $(string(dev.ipaddr))")
 end
 
@@ -95,7 +96,7 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16)
-    return DSA3217(ip, port, params, buf, task, collect(1:16), chn, conf)
+    return DSA3217(devname, ip, port, params, buf, task, collect(1:16), chn, conf)
     
      
     
