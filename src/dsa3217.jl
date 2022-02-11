@@ -332,10 +332,10 @@ function AbstractDAQs.daqread(dev::DSA3217)
         sleep(0.1)
     end
     # Wait for task to end
-    if !istaskdone(dev.task.task) && istaskstarted(dev.task.task)
+    #if !istaskdone(dev.task.task) && istaskstarted(dev.task.task)
         wait(dev.task.task)
         sleep(0.1)
-    end
+    #end
     
     # Get the data:
     return readpressure(dev)                      
