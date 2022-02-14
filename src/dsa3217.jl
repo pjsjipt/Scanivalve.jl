@@ -272,19 +272,19 @@ function AbstractDAQs.daqstart(dev::DSA3217, usethread=false)
     return tsk
 end
 
-function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; channames="P")
+function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
 
     cmin, cmax = extrema(chans)
     if cmin < 1 || cmax > 16
         throw(ArgumentError("Only channels 1-16 are available to DSA3217"))
     end
 
-    if isa(channames, AbstractString) || isa(channames, Symbol)
-        chn = string(channames) .* numstring.(chans)
-    elseif length(channames) == length(chans)
-        chn = string.(channames) .* string.(chans)
+    if isa(names, AbstractString) || isa(names, Symbol)
+        chn = string(names) .* numstring.(chans)
+    elseif length(names) == length(chans)
+        chn = string.(names)
     else
-        throw(ArgumentError("Argument `channames` should have length 1 or the length of `chans`"))
+        throw(ArgumentError("Argument `names` should have length 1 or the length of `chans`"))
     end
 
     dev.chans = collect(chans)
