@@ -12,6 +12,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     chans::Vector{Int}
     channames::Vector{String}
     conf::DAQConfig
+    usethread::Bool
 end
 
 "Returns the IP address of the device"
@@ -67,7 +68,7 @@ openscani(fun::Function, dev::DSA3217, timeout=5) =
 
 
 function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
-                 timeout=5, buflen=300_000, tag="", sn="")
+                 timeout=5, buflen=100_000, tag="", sn="", usethread=true)
     
     ip = IPv4(ipaddr)
     port = 23
@@ -96,7 +97,8 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16)
-    return DSA3217(devname, ip, port, params, buf, task, collect(1:16), chn, conf)
+    return DSA3217(devname, ip, port, params, buf, task, collect(1:16),
+                   chn, conf, usethread)
     
      
     
@@ -258,12 +260,11 @@ end
 
 
 
-function AbstractDAQs.daqstart(dev::DSA3217, usethread=false)
+function AbstractDAQs.daqstart(dev::DSA3217)
     if isreading(dev)
         error("Scanivalve already reading!")
     end
-
-    if usethread
+    if dev.usethread
         tsk = Threads.@spawn scan!(dev)
     else
         tsk = @async scan!(dev)
