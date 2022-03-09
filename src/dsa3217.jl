@@ -3,16 +3,27 @@ using Dates
 
 
 mutable struct DSA3217 <: AbstractScanivalve
+    "Device name"
     devname::String
+    "IP adress"
     ipaddr::IPv4
+    "TCP/IP port"
     port::Int
+    "Configurations paramenters"
     params::Dict{Symbol,Any}
+    "Data acquisition buffer"
     buffer::CircMatBuffer{UInt8}
+    "Data aquisition task handling"
     task::DAQTask
+    "Index of channels"
     chans::Vector{Int}
+    "Names of channels"
     channames::Vector{String}
+    "Map from channel name to channel index"
     chanidx::Dict{String,Int}
+    "Scanivalve configuration"
     conf::DAQConfig
+    "Use threading"
     usethread::Bool
 end
 
@@ -22,9 +33,13 @@ ipaddr(dev::DSA3217) = dev.ipaddr
 "Returns the port number used for TCP/IP communication"
 portnum(dev::DSA3217) = dev.port
 
+"Is DSA3217 acquiring data?"
 AbstractDAQs.isreading(dev::DSA3217) = isreading(dev.task)
+
+"How many samples have been read?"
 AbstractDAQs.samplesread(dev::DSA3217) = samplesread(dev.task)
 
+"Convert number to string justifying to the right by padding with zeros"
 numstring(x::Integer, n=2) = string(10^n+x)[2:end]
 
 function Base.show(io::IO, dev::DSA3217)
@@ -33,7 +48,29 @@ function Base.show(io::IO, dev::DSA3217)
     println(io, "    IP: $(string(dev.ipaddr))")
 end
 
+"""
+`openscani(ipaddr::IPv4, port=23,  timeout=5)`
+`openscani(dev::DSA3217,  timeout=5)`
+`openscani(fun::Function, ipaddr::IPv4, port=23, timeout=5)`
+`openscani(fun::Function, dev::DSA3217, timeout=5)`
 
+Open a TCP/IP connection to scanivalve.
+
+## Arguments
+
+ * `ipaddr` IP Address in `IPv4` format
+ * `port` TCP/IP port
+ * `timeout` Timeout to wait while trying to connect to scanivalve
+ * `fun` Function that is executed after opening the function.
+
+The best way to use this function is to use `do` construct:
+
+```julia
+open(dev) do sock
+    # Do stuff with the socket
+end
+```
+"""
 function openscani(ipaddr::IPv4, port=23,  timeout=5)
         
     sock = TCPSocket()
@@ -67,7 +104,74 @@ openscani(fun::Function, dev::DSA3217, timeout=5) =
 
 
 
+"""
+```
+DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
+                 timeout=5, buflen=100_000, tag="", sn="", usethread=true)
+```
 
+Create an `AbstractDAQ` device that is used to communicate with DSA3217.
+
+## Arguments
+
+ * `devname`: String with name assigned to the specific `DSA3217` device.
+ * `ipaddr`: IP address of pressure scanner.
+ * `timeout`: timeout to wait while trying to connect to scanivalve.
+ * `buflen`: size of buffer used to store data acquired.
+ * `tag`: string with device tag.
+ * `sn`: string with serial number of the device.
+ * `usethread`: `Bool` specifying whether to use thread when acquiring data asynchronously.
+
+If `usethread` is `false`, `@async` is used. Remember that to use threads, `Julia` should be started with `-t N` (N is the number of threads):
+```
+julia -t 4    # Starts julia with 4 threads.
+```
+
+   
+## Input channels
+
+After establishing connection with the DSA3217, all 16 channels are available and named 
+`P01` through `P16`. This can be changed using the method [`daqaddinput`](@ref).
+
+## Data acquisition configuration
+
+To configure the data acquisition, there are two possibilities:
+
+ - [`daqconfigdev`](@ref) Uses notation and terminology from DSA3217's manual to configure
+ - [`daqconfig`](@ref) Uses parameters such as sampling frequency and total acquisition time
+
+## Acquiring data
+
+To do a synchronous data acquisition, method [`daqacquire`](@ref) should be used. In this case, the function blocks until data acquisition is finalized.
+
+For asynchronous data acquisition, the method [`daqstart`](@ref) starts data aquisition. To read the data use method [`daqread`](@ref). This method will wait until data acquisition is over.
+
+Method [`isreading`](@ref) checks whether data acquisition is going on. [`samplesread`](@ref) returns.
+
+[`daqstop`](@ref) interrupts an asynchronous data acquisition task.  
+
+## Examples
+```jldoctest
+julia> using Scanivalve
+
+julia> scani = DSA3217("dpref", "191.30.80.131")
+Scanivalve DSA3217
+    Dev Name: dpref
+    IP: 191.30.80.131
+
+julia> daqaddinput(scani, 1:4, names=["ptot", "pest", "prtot", "prest"])
+
+julia> daqconfigdev(scani, PERIOD=500, AVG=10, FPS=10)
+
+julia> p = daqacquire(scani);
+
+julia> daqstart(scani)
+Task (runnable) @0x00007fa61d769e40
+
+julia> p = daqread(scani);
+
+```
+"""
 function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
                  timeout=5, buflen=100_000, tag="", sn="", usethread=true)
     
@@ -111,6 +215,9 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
 end
 
 
+"""
+`daqpacketsize(::Type{DSA3217}, eu=1, time=1)`
+"""
 function daqpacketsize(::Type{DSA3217}, eu=1, time=1)
     if time==0
         return (eu==0) ? 72 : 104 
@@ -119,15 +226,40 @@ function daqpacketsize(::Type{DSA3217}, eu=1, time=1)
     end
 end
 
+"""
+`daqparam(dev, param)`
+
+Returns de value configuration parameter `param` (s `Symbol`)
+"""
 daqparam(dev, param) = dev.params[param]
 
+"""
+`framesize(dev::DSA3217)`
+
+Return the size of a data acquisition frame. A frame contains a data from all channels.
+"""
 framesize(dev::DSA3217) = daqpacketsize(DSA3217, daqparam(dev,:EU), daqparam(dev,:TIME))
 
 
-                                            
+"""
+`deltat(dev)`
+
+Calculate the sampling interval calculated from data acquisition paramters:
+
+ * `PERIOD` Time in μs between data acquisition in *each channel*
+ * `AVG` Number of frames that are read before averaging.
+
+"""                                            
 deltat(dev) = 16*daqparam(dev,:PERIOD)*1e-6 * daqparam(dev,:AVG)
 
 
+"""
+`stopscan(dev::DSA3217)`
+
+Change the `stop` field of `task::DAQTask` field of `DSA3217` object to `true`.
+This will flag that data acquisition should stop.
+
+"""
 function stopscan(dev::DSA3217)
     tsk = dev.task
     
@@ -137,16 +269,24 @@ function stopscan(dev::DSA3217)
 end
 
     
+"""
+`scan!(dev::DSA3217)`
 
+Execute data acquisition from `DSA3217` devices. Present configuration should be used.
+
+"""
 function scan!(dev::DSA3217)
 
+    # Check if data acquisition is already going on.
     tsk = dev.task
     isreading(tsk) && error("DSA is already reading!")
 
+    # Clear stuff and adjust buffer.
     cleartask!(tsk)
 
     buf = dev.buffer
     fps = daqparam(dev, :FPS)
+    # For long data acquisition, buffer might have to be increased.
     if fps > capacity(buf) 
         resize!(buf, fps)
     end
@@ -160,29 +300,39 @@ function scan!(dev::DSA3217)
     else
         fps1 = fps
     end
-    
+
+    # Calculate time interval between frames
     δt = deltat(dev) # Time per frame
     stopped = false
 
+    # Register time and date of data acquisition
     tsk.time = now()
-    
+
+    # Open socket, send SCAN command and acquire data.
     openscani(dev) do sock
-        println(sock, "SCAN")
+        println(sock, "SCAN") # Flags scanivalve to start data acquisition
         tsk.isreading = true
+        # Initial data acquisition instant
         t0 = time_ns()
+        # Get memory to store first frame
         b = nextbuffer(buf)
         readbytes!(sock, b, fsize)
+        # Get the time before second frame. Remember that
+        # there might be some latency. But for scanivalve this is not very important
+        # since the calculated sampling time (`deltat`) is fairly accurate.
         t1 = time_ns()
         settiming!(tsk, t0, t1, 1)
         tsk.nread += 1
         for i in 2:fps1
+            # Check if data acquisition should stop ([`daqstop`]($ref) or
+            # [`stopscan`](@ref) commands).
             if tsk.stop
                 stopped = true
                 println(sock, "STOP")
                 sleep(0.5)
                 break
             end
-            
+            # Read next frame
             b = nextbuffer(buf)
             readbytes!(sock, b, fsize)
             tn = time_ns()
@@ -190,12 +340,13 @@ function scan!(dev::DSA3217)
             settiming!(tsk, t1, tn, i-1)
             
         end
-
+        
         tsk.isreading = false
 
-        # If we stopped, try to read another frame
+        # If we stopped, try to read another frame.
+        # there might be something in the buffer. But we will ignore it
         if stopped
-            delay = max(2δt, 1.0)
+            delay = max(2δt, 1.0) # Let's give it some time.
             ev = Base.Event()
             Timer(_ -> begin
                       timeout=true
@@ -212,11 +363,67 @@ function scan!(dev::DSA3217)
     return
 end
 
+
+"""
+Valid units accepted by DSA3217.
+"""
 const validunits = ["ATM", "BAR", "CMHG", "CMH2O", "DECIBAR", "FTH2O", "GCM2",
                     "INHG", "INH2O", "KPA", "KGCM2", "KGM2", "KIPIN2", "KNM2",
                     "MH2O", "MMHG", "MPA", "NCM2", "MBAR", "OZFT2", "OZIN2",
                     "PA", "PSF", "NM2", "PSI", "TORR"]
 
+"""
+`daqconfig(dev::DSA3217; kw...)`
+
+Generic configuration of data acquisition. Here we specify how many samples will be read
+and how fast it should be read.
+
+## Arguments
+
+ * `dt`: period of time in seconds between samples
+ * `rate`: sampling rate in Hz between samples
+ * `nsamples`: number of samples that should be read
+ * `time`: time in seconds that data should be acquired.
+
+If `dt` is specified, 
+```
+rate = 1/dt
+```
+
+Either the number of samples should be configured or the acquisition time: 
+```
+time = nsamples * dt
+```
+
+Samples can be averaged. The `avg` parameter specifies how many samples should be averaged.
+Attention: the sampling time (`dt`) is includes the averaging.
+
+Trigger can also be specified.
+
+ * `trigger == 0` Internal trigger
+ * `trigger == 1` Use external trigger.
+
+**Important** If a parameter is not used, previous configuration will be used. 
+Remember to set the value of `avg`. The best option is to specify all the options.
+
+## Example
+```jldoctest
+julia> daqconfig(scani, rate=100, nsamples=100, avg=1)
+
+julia> p = daqacquire(scani);
+
+julia> samplingrate(p)
+100.0
+
+julia> daqconfig(scani, dt=0.1, time=1, avg=1)
+
+julia> p = daqacquire(scani);
+
+julia> samplingrate(p)
+10.0
+
+```
+"""
 function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
     cmds = String[]
     
@@ -267,7 +474,30 @@ function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
 end
 
 
+"""
+`daqstart(dev::DSA3217)`
 
+Start an asynchrounous data acquisition. 
+
+If `dev.usethread == true`, a thread will be started with `@spawn`. Othwerwise, `@async` is used. This should be specified when creating the DSA3217 object ([`DSA3217`](@ref)).
+
+## Example
+
+```jldoctest
+julia> daqconfig(scani, rate=100, time=10, avg=1) # 10s, 100 Hz
+
+julia> @time begin
+             daqstart(scani) # Start data
+             sleep(5) # Wait 5s
+             daqstop(scani) # Interrupt daq
+             p = daqread(scani) # Read data
+             size(p.data)
+end
+  6.531171 seconds (40.08 k allocations: 2.049 MiB, 1.86% compilation time)
+(4, 487)
+
+```
+"""
 function AbstractDAQs.daqstart(dev::DSA3217)
     if isreading(dev)
         error("Scanivalve already reading!")
@@ -281,6 +511,9 @@ function AbstractDAQs.daqstart(dev::DSA3217)
     return tsk
 end
 
+"""
+
+"""
 function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
 
     cmin, cmax = extrema(chans)
