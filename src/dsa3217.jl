@@ -299,9 +299,11 @@ function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
     dev.chans = collect(chans)
     dev.channames = chn
     n = length(chans)
+    chanidx = Dict{String,Int}()
     for i in 1:n
-        dev.chanidx[chn[i]] = i
+        chanidx[chn[i]] = i
     end
+    dev.chanidx = chanidx
     
 
     return
@@ -337,7 +339,7 @@ function readpressure(dev::DSA3217)
     return press, 1.0/δt, tsk.time
 end
 
-    
+export meastime, samplingrate, measdata, measinfo
 function AbstractDAQs.daqread(dev::DSA3217)
 
     # Check if the reading is continous
@@ -350,12 +352,19 @@ function AbstractDAQs.daqread(dev::DSA3217)
     wait(dev.task.task)
     
     # Get the data:
-    return readpressure(dev)                      
+    P, fs, t = readpressure(dev)
+    unit = dev.params[:UNITSCAN]
+    return MeasData{Matrix{Float32},String}(devname(dev), devtype(dev),
+                                             t, fs, P, unit, dev.chanidx)
+    
 end
 
 function AbstractDAQs.daqacquire(dev::DSA3217)
     scan!(dev)
-    return readpressure(dev)
+    P, fs, t = readpressure(dev)
+    unit = dev.params[:UNITSCAN]
+    return MeasData{Matrix{Float32},String}(devname(dev), devtype(dev),
+                                             t, fs, P, unit, dev.chanidx)
 end
 
 
@@ -532,6 +541,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         unitscan = kw[:UNITSCAN]
         if unitscan ∈ validunits
             push!(cmds, "SET UNITSCAN $unitscan")
+            dev.params[:UNITSCAN] = unitscan
         else
             throw(DomainError(unitscan, "Invalid unit!"))
         end
