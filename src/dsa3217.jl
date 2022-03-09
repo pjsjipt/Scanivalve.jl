@@ -1,4 +1,4 @@
-
+using Dates
 
 
 
@@ -11,6 +11,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     task::DAQTask
     chans::Vector{Int}
     channames::Vector{String}
+    chanidx::Dict{String,Int}
     conf::DAQConfig
     usethread::Bool
 end
@@ -97,8 +98,13 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16)
+    chanidx = Dict{String,Int}()
+    for i in 1:16
+        chanidx[chn[i]] = i
+    end
+    
     return DSA3217(devname, ip, port, params, buf, task, collect(1:16),
-                   chn, conf, usethread)
+                   chn, chanidx, conf, usethread)
     
      
     
@@ -157,6 +163,8 @@ function scan!(dev::DSA3217)
     
     δt = deltat(dev) # Time per frame
     stopped = false
+
+    tsk.time = now()
     
     openscani(dev) do sock
         println(sock, "SCAN")
@@ -290,6 +298,11 @@ function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
 
     dev.chans = collect(chans)
     dev.channames = chn
+    n = length(chans)
+    for i in 1:n
+        dev.chanidx[chn[i]] = i
+    end
+    
 
     return
 end
@@ -320,7 +333,8 @@ function readpressure(dev::DSA3217)
     else
         error("Reading data without engineering units (EU=1) not implemented yet!")
     end
-    return press, 1.0/δt
+    
+    return press, 1.0/δt, tsk.time
 end
 
     
