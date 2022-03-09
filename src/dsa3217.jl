@@ -512,7 +512,54 @@ function AbstractDAQs.daqstart(dev::DSA3217)
 end
 
 """
+`daqaddinput(dev::DSA3217, chans=1:16; names="P")`
 
+Specify input channels.
+
+The DSA3217 always reads all 16 channels. Choosing a smaller 
+number of channels will not make data acquisition faster. But it may
+be convenient to forget some of them. 
+
+## Arguments
+
+ * `chans`: an abstract vector with the index of channels that should be used.
+ * `names`: names of channels (see next)
+
+## Channel names
+
+The `names` keyword argument is used to specify the names of the channels used.
+
+If a single string is specified, the channel names will be this string followed by
+the index (padded by 1 zero at most). See example.
+
+Individual channels can be named but in this case, every single channel should be named.
+
+## See also 
+
+[`DSA3217`](@ref), [`daqconfig`](@ref), [`daqconfigdev`](@ref), [`daqacquire`](@ref), 
+[`daqstart`](@ref), [`daqread`](@ref)
+
+## Example
+```jldoctest
+julia> daqaddinput(scani, 8:12, names="press")
+
+julia> daqchannels(scani)
+5-element Vector{String}:
+ "press08"
+ "press09"
+ "press10"
+ "press11"
+ "press12"
+
+julia> daqaddinput(scani, 1:4, names=["ptot", "pest", "prtot", "prest"])
+
+julia> daqchannels(scani)
+4-element Vector{String}:
+ "ptot"
+ "pest"
+ "prtot"
+ "prest"
+```
 """
 function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
 
@@ -542,6 +589,29 @@ function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
     return
 end
 
+"""
+`daqstop(dev::DSA3217)`
+
+Interrupt asynchronous data acquisition. 
+
+## Example
+
+```jldoctest
+julia> daqconfig(scani, rate=100, time=10, avg=1) # 10s, 100 Hz
+
+julia> @time begin
+             daqstart(scani) # Start data
+             sleep(5) # Wait 5s
+             daqstop(scani) # Interrupt daq
+             p = daqread(scani) # Read data
+             size(p.data)
+end
+  6.531171 seconds (40.08 k allocations: 2.049 MiB, 1.86% compilation time)
+(4, 487)
+
+```
+
+"""
 function AbstractDAQs.daqstop(dev::DSA3217)
 
     tsk = dev.task.task
@@ -555,6 +625,12 @@ function AbstractDAQs.daqstop(dev::DSA3217)
 end
 
 
+"""
+`readpressure(dev::DSA3217)`
+
+Reads pressure, sampling rate and acquisition start time from buffer.
+
+"""
 function readpressure(dev::DSA3217)
     isreading(dev) && error("Scanivalve still acquiring data!")
 
@@ -573,6 +649,28 @@ function readpressure(dev::DSA3217)
 end
 
 export meastime, samplingrate, measdata, measinfo
+
+"""
+`daqread(dev::DSA3217)`
+
+Wait until data acquisition ends and read data.
+
+If continous data acqisition is used, this function will stop data acquisition and return data. 
+
+Data acquisition starts with [`daqstart`](@ref) command. 
+
+To just to get the data already acquired, there will be function [`daqpeek`](@ref) that has 
+not been implemented yet.
+
+## Return value
+
+This function returns a [`AbstractDAQs.MeasData`](@ref) object that contains the data as 
+well as sampling rate and other meta data.
+
+## Usage
+See example for [`daqstart`](@ref) command. 
+
+"""
 function AbstractDAQs.daqread(dev::DSA3217)
 
     # Check if the reading is continous
@@ -592,6 +690,21 @@ function AbstractDAQs.daqread(dev::DSA3217)
     
 end
 
+"""
+`daqacquire(dev::DSA3217)`
+
+Execute a **s**ynchronous data acquisition. 
+
+
+## Return value
+
+This function returns a [`AbstractDAQs.MeasData`](@ref) object that contains the data as 
+well as sampling rate and other meta data.
+
+## Usage
+See example for [`DSA3217`](@ref) command. 
+
+"""
 function AbstractDAQs.daqacquire(dev::DSA3217)
     scan!(dev)
     P, fs, t = readpressure(dev)
@@ -600,7 +713,12 @@ function AbstractDAQs.daqacquire(dev::DSA3217)
                                              t, fs, P, unit, dev.chanidx)
 end
 
+"""
+`read_eu_press(buf, chans)`
 
+Reads pressure in engineering units (EU) from the data acquisition buffer.
+   
+"""
 function read_eu_press(buf, chans)
 
     nt = length(buf)
@@ -616,6 +734,16 @@ function read_eu_press(buf, chans)
     return P
 end
 
+"""
+`getdaqtime(dev, nfr)`
+
+Returns the mean sampling time. If no time is specified (paramter `TIME==0`), 
+just calculate from acquisition parameters `PERIOD` and `AVG`. 
+
+Otherwises, get the value from the frames.
+Reads pressure in engineering units (EU) from the data acquisition buffer.
+   
+"""
 function getdaqtime(dev, nfr)
     buf = dev.buffer
     b = buf[1,1] # Identify the packet
@@ -669,6 +797,11 @@ end
 
 import Base.close
 
+"""
+`close(scani::DSA3217)`
+
+Return scanivalve to a 'sane' configuration.
+"""
 function close(scani::DSA3217)
     openscani(dev) do s
         println(s, "SET EU 1")
@@ -683,8 +816,11 @@ function close(scani::DSA3217)
     
 end
 
+"Number of data acquisition channels"
 numchans(scani::DSA3217) = 16
+"Number of data acquisition channels"
 AbstractDAQs.numchannels(scani::DSA3217) = length(scani.chans)
+"Name of data acquisition channels"
 AbstractDAQs.daqchannels(scani::DSA3217) = scani.channames
 
 #socket(scani) = scani.socket
@@ -715,7 +851,38 @@ checkeu(dev::DSA3217, eu) = (eu != 0) ? 1 : 0
 
 const validparameters = [:FPS, :PERIOD, :AVG, :TIME, :EU, :UNITSCAN, :XSCANTRIG]
 
-    
+"""
+`daqconfigdev(dev::DSA3217; kw...)`
+
+Configure data acquisition with parameters described in the manual.
+
+The following parameters are available:
+
+ * `FPS`: Integer specifying the number of frames (samples) to acquire
+ * `PERIOD`: time spent in each pressure sensor in μs
+ * `AVG`: Number of frames to average before outputing a mean frame
+ * `TIME`: 0 - No time in frame, 1 or 2 (ms or μs)
+ * `EU`: 1 if engineering units should be used (not implemented for non EU)
+ * `UNITSCAN`: String with pressure units that should be used. Check `validunits` vector.
+ * `XSCANTRIG`: 0 for internal trigger or 1 for external trigger.
+
+See DSA3217 manual for further information.
+
+## Examples
+
+```jldoctest
+julia> daqconfigdev(scani, PERIOD=500, AVG=10, FPS=10)
+
+julia> p = daqacquire(scani);
+
+julia> samplingrate(p)
+12.5
+
+julia> size(p.data)
+(16, 10)
+```
+
+"""    
 function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
 
     k = keys(kw)
@@ -781,7 +948,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
     end
 
     if :XSCANTRIG ∈ k
-        xscantrig = kw[:EU]
+        xscantrig = kw[:XSCANTRIG]
         if 0 ≤ eu ≤ 1
             push!(cmds, "SET SCANTRIG $xscantrig")
             dev.params[:XSCANTRIG] = xscantrig
@@ -801,6 +968,11 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
     end
 end
 
+"""
+`updateconf!(dev::DSA3217)`
+
+Update configuration from `params` field of `DSA3217` object.
+"""
 function updateconf!(dev::DSA3217)
     p = dev.params
     ipars = dev.conf.ipars
@@ -819,6 +991,13 @@ function updateconf!(dev::DSA3217)
     
 end
 
+"""
+`daqzero(dev::DSA3217; time=15)`
+
+Execute a hardware zero. The time parameter specifies how long the function should sleep
+before returning.
+
+"""
 function AbstractDAQs.daqzero(dev::DSA3217; time=15)
     openscani(dev) do io
         println(io, "CALZ")
@@ -826,6 +1005,13 @@ function AbstractDAQs.daqzero(dev::DSA3217; time=15)
     end
 end
 
+"""
+`readmanylines(dev, cmd, delay=0.5)`
+
+Several commands return data as a sequence of text lines. Read as many lines as possible
+waiting for `delay` seconds before ending any attempt to read.
+
+"""
 function readmanylines(dev, cmd, delay=0.5)
 
     
@@ -866,7 +1052,11 @@ end
 
     
     
-    
+"""
+`readnlines(s, n=1)`
+
+Read `n` lines from open socket `s`.
+"""    
 function readnlines(s, n=1)
     lst = String[]
     for i in 1:n
@@ -875,6 +1065,18 @@ function readnlines(s, n=1)
     return lst
 end
 
+"""
+`parse_dsa_set(lst)`
+
+Usually configuration parameters from scanivalve are read as a collection of lines with 
+the following format (each line):
+```
+SET PARAMETER VALUE
+```
+
+This function will create a `Dict{String,String}` from the list of lines with the format 
+`d["PARAMETER"] = "VALUE"`
+"""    
 function parse_dsa_set(lst)
     p = Dict{String,String}()
     for l in lst
@@ -884,6 +1086,11 @@ function parse_dsa_set(lst)
     return p
 end
 
+"""
+`listany(dev::DSA3217, cmd, nparams)`
+
+List any configuration parameter by sending command LIST cmd to scanivalve.
+"""
 function listany(dev::DSA3217, cmd, nparams)
     openscani(dev) do sock
         println(sock, "LIST $cmd\r")
@@ -892,6 +1099,12 @@ function listany(dev::DSA3217, cmd, nparams)
 end
 
 
+"""
+`listanydict(dev::DSA3217, cmd, nparams)`
+
+List any configuration parameter by sending command LIST cmd to scanivalve. 
+Build a dictionary with the output.
+"""
 listanydict(scani::AbstractScanivalve, cmd, nparams) = parse_dsa_set(listany(scani, cmd, nparams))
 
 function listanyval(scani::AbstractScanivalve,
@@ -908,14 +1121,24 @@ function listanyval(scani::AbstractScanivalve,
     return vals
 end
 
+"Execute command LIST SCAN"
 listscan(scani::DSA3217) = listanydict(scani, "S", 14)
+"Execute command LIST I"
 listident(scani::DSA3217) = listanydict(scani, "I", 4)
+"Execute command LIST Z"
 listzero(scani::DSA3217) = listanyval(scani, "Z", numchans(scani), Int)
+"Execute command LIST O"
 listoffset(scani::DSA3217) = listanyval(scani, "O", numchans(scani), Float64)
+"Execute command LIST D"
 listdelta(scani::DSA3217) = listanyval(scani, "O", numchans(scani), Float64)
+"Execute command LIST G"
 listgain(scani::DSA3217) = listanyval(scani, "G", numchans(scani), Float64)
 
+"""
+`setparam(scani, param, val)`
 
+Set the value of a configuration paramenter on the scanivalve.
+"""
 setparam(scani, param, val) =
     openscani(scani) do sock
         println(sock, "SET $param $val\r")
