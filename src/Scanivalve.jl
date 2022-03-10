@@ -12,7 +12,7 @@ export daqzero, daqstop, daqaddinput, numchannels, daqchannels
 export DAQConfig, iparameters, fparameters, sparameters, devname
 export daqdevip, daqdevmodel, daqdevserialnum, daqdevtag
 
-
+"Base type for Scanivalve pressure scanners"
 abstract type AbstractScanivalve <: AbstractPressureScanner end
 
 

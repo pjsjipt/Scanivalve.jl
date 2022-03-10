@@ -842,13 +842,7 @@ function scanpacksize(dev::DSA3217, TIME=0, EU=1)
 
 end
 
-checkfps(dev::DSA3217, fps) = clamp(fps, 1, 1_800_000)
-checkperiod(dev::DSA3217, period) = clamp(period, 125, 65535)
-checkavg(dev::DSA3217, avg) = clamp(avg, 1, 240)
-checkxscantrig(dev::DSA3217, xtrig) = (xtrig != 1) ? 0 : 1
-checktime(dev::DSA3217, t) = clamp(t, 0, 2)
-checkeu(dev::DSA3217, eu) = (eu != 0) ? 1 : 0
-
+"Paramaters valid for `daqconfigdev`"
 const validparameters = [:FPS, :PERIOD, :AVG, :TIME, :EU, :UNITSCAN, :XSCANTRIG]
 
 """
