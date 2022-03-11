@@ -803,7 +803,7 @@ import Base.close
 Return scanivalve to a 'sane' configuration.
 """
 function close(scani::DSA3217)
-    openscani(dev) do s
+    openscani(scani) do s
         println(s, "SET EU 1")
         println(s, "SET AVG 100")
         println(s, "SET PERIOD 500")
