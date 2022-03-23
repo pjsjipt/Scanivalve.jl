@@ -78,7 +78,11 @@ function openscani(ipaddr::IPv4, port=23,  timeout=5)
     try
         connect(sock, ipaddr, port)
     catch e
-        error("Could not connect to $ipaddr ! Turn on the device or set the right IP address!")
+        if isa(e, InterruptException)
+            throw(InterruptException())
+        else
+            error("Could not connect to $ipaddr ! Turn on the device or set the right IP address!")
+        end
     finally
         close(t)
     end
@@ -88,19 +92,28 @@ end
 
 openscani(dev::DSA3217,  timeout=5) = openscani(ipaddr(dev), portnum(dev), timeout)
 
-function openscani(fun::Function, ipaddr::IPv4, port=23, timeout=5)
-    
-    io = openscani(ipaddr, port, timeout)
+
+function openscani(fun::Function, ip, port=23, timeout=5)
+    io = openscani(ip, port, timeout)
     try
         fun(io)
+    catch e
+        throw(e)
     finally
         close(io)
     end
-    
 end
 
-openscani(fun::Function, dev::DSA3217, timeout=5) =
-    openscani(fun, ipaddr(dev), portnum(dev), timeout)
+function openscani(fun::Function, dev::DSA3217, timeout=5)
+    io = openscani(ipaddr(dev), portnum(dev), timeout)
+    try
+        fun(io)
+    catch e
+        throw(e)
+    finally
+        close(io)
+    end
+end
 
 
 
@@ -308,6 +321,8 @@ function scan!(dev::DSA3217)
     # Register time and date of data acquisition
     tsk.time = now()
 
+    exthrown = false # No exception thrown!
+    
     # Open socket, send SCAN command and acquire data.
     openscani(dev) do sock
         println(sock, "SCAN") # Flags scanivalve to start data acquisition
@@ -326,18 +341,30 @@ function scan!(dev::DSA3217)
         for i in 2:fps1
             # Check if data acquisition should stop ([`daqstop`]($ref) or
             # [`stopscan`](@ref) commands).
-            if tsk.stop
-                stopped = true
-                println(sock, "STOP")
-                sleep(0.5)
-                break
+            try
+                if tsk.stop
+                    stopped = true
+                    println(sock, "STOP")
+                    sleep(0.5)
+                    break
+                end
+                # Read next frame
+                b = nextbuffer(buf)
+                readbytes!(sock, b, fsize)
+                tn = time_ns()
+                tsk.nread += 1
+                settiming!(tsk, t1, tn, i-1)
+            catch e
+                if isa(e, InterruptException)
+                    # Ctrl-C captured!
+                    # We want to stop the data acquisition safely and then rethwrow it!
+                    tsk.stop = true
+                    exthrown = true
+                else
+                    throw(e)
+                end
             end
-            # Read next frame
-            b = nextbuffer(buf)
-            readbytes!(sock, b, fsize)
-            tn = time_ns()
-            tsk.nread += 1
-            settiming!(tsk, t1, tn, i-1)
+            
             
         end
         
@@ -358,6 +385,12 @@ function scan!(dev::DSA3217)
                 notify(ev)
             end
             wait(ev)
+            if exthrown
+                # Data acquisition stopped because of a Ctrl-C
+                # We handled stopping DAQ smoothly and now we will rethrow
+                throw(InterruptException())
+            end
+            
         end
     end
     return
