@@ -1,5 +1,5 @@
 using Dates
-
+import DataStructures: OrderedDict
 
 
 mutable struct DSA3217 <: AbstractScanivalve
@@ -20,7 +20,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     "Names of channels"
     channames::Vector{String}
     "Map from channel name to channel index"
-    chanidx::Dict{String,Int}
+    chanidx::OrderedDict{String,Int}
     "Scanivalve configuration"
     conf::DAQConfig
     "Use threading"
@@ -215,7 +215,7 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DAQTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16)
-    chanidx = Dict{String,Int}()
+    chanidx = OrderedDict{String,Int}()
     for i in 1:16
         chanidx[chn[i]] = i
     end
@@ -718,8 +718,8 @@ function AbstractDAQs.daqread(dev::DSA3217)
     # Get the data:
     P, fs, t = readpressure(dev)
     unit = dev.params[:UNITSCAN]
-    return MeasData{Matrix{Float32},String}(devname(dev), devtype(dev),
-                                             t, fs, P, unit, dev.chanidx)
+    return MeasData{Matrix{Float32}}(devname(dev), devtype(dev),
+                                     t, fs, P, dev.chanidx)
     
 end
 
@@ -742,8 +742,8 @@ function AbstractDAQs.daqacquire(dev::DSA3217)
     scan!(dev)
     P, fs, t = readpressure(dev)
     unit = dev.params[:UNITSCAN]
-    return MeasData{Matrix{Float32},String}(devname(dev), devtype(dev),
-                                             t, fs, P, unit, dev.chanidx)
+    return MeasData{Matrix{Float32}}(devname(dev), devtype(dev),
+                                     t, fs, P, dev.chanidx)
 end
 
 """
