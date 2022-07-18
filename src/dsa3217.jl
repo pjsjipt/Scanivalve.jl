@@ -612,7 +612,7 @@ function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
     dev.chans = collect(chans)
     dev.channames = chn
     n = length(chans)
-    chanidx = Dict{String,Int}()
+    chanidx = OrderedDict{String,Int}()
     for i in 1:n
         chanidx[chn[i]] = i
     end
