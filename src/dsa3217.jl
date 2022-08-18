@@ -9,14 +9,12 @@ mutable struct DSA3217 <: AbstractScanivalve
     ipaddr::IPv4
     "TCP/IP port"
     port::Int
-    "Configurations paramenters"
-    params::Dict{Symbol,Any}
     "Data acquisition buffer"
     buffer::CircMatBuffer{UInt8}
     "Data aquisition task handling"
     task::DaqTask
     "Channel information"
-    chans::DaqChannels{Vector{Int}}
+    chans::DaqChannels{Vector{Int},String}
     "Scanivalve configuration"
     conf::DaqConfig
     "Use threading"
@@ -29,11 +27,13 @@ ipaddr(dev::DSA3217) = dev.ipaddr
 "Returns the port number used for TCP/IP communication"
 portnum(dev::DSA3217) = dev.port
 
+DAQCore.devtype(dev::DSA3217) = "DSA3217"
+
 "Is DSA3217 acquiring data?"
-AbstractDAQs.isreading(dev::DSA3217) = isreading(dev.task)
+DAQCore.isreading(dev::DSA3217) = isreading(dev.task)
 
 "How many samples have been read?"
-AbstractDAQs.samplesread(dev::DSA3217) = samplesread(dev.task)
+DAQCore.samplesread(dev::DSA3217) = samplesread(dev.task)
 
 "Convert number to string justifying to the right by padding with zeros"
 numstring(x::Integer, n=2) = string(10^n+x)[2:end]
@@ -209,11 +209,10 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DaqTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16,2)
-    chans = DaqChannels(devname, "DSA3217", chn, "Pa", 1:16)
+    chans = DaqChannels(devname, "DSA3217", chn, "PA", collect(1:16))
     
-    return DSA3217(devname, ip, port, params, buf, task, chans, conf, usethread)
+    return DSA3217(devname, ip, port, buf, task, chans, conf, usethread)
     
-     
     
 end
 
@@ -442,14 +441,14 @@ julia> samplingrate(p)
 
 ```
 """
-function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
+function DAQCore.daqconfig(dev::DSA3217; kw...)
     cmds = String[]
     
     if haskey(kw, :avg)
         avg = round(Int, kw[:avg])
         daqconfigdev(dev, AVG=avg)
     else
-        avg = dev.params[:AVG]
+        avg = iparam(dev, "AVG")
     end
     
 
@@ -465,7 +464,7 @@ function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
         end
         daqconfigdev(dev, PERIOD=period)
     else
-        period = dev.params[:PERIOD]
+        period = iparam(dev, "PERIOD")
     end
     
     if haskey(kw, :nsamples) && haskey(kw, :time)
@@ -480,7 +479,7 @@ function AbstractDAQs.daqconfig(dev::DSA3217; kw...)
         end
         daqconfigdev(dev, FPS=nsamples)
     else
-        nsamples = dev.params[:FPS]
+        nsamples = iparam(dev, "FPS")
     end
         
     if haskey(kw, :trigger)
@@ -516,7 +515,7 @@ end
 
 ```
 """
-function AbstractDAQs.daqstart(dev::DSA3217)
+function DAQCore.daqstart(dev::DSA3217)
     if isreading(dev)
         error("Scanivalve already reading!")
     end
@@ -579,7 +578,7 @@ julia> daqchannels(scani)
  "prest"
 ```
 """
-function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
+function DAQCore.daqaddinput(dev::DSA3217, chans=1:16; names="P")
 
     cmin, cmax = extrema(chans)
     if cmin < 1 || cmax > 16
@@ -593,16 +592,16 @@ function AbstractDAQs.daqaddinput(dev::DSA3217, chans=1:16; names="P")
     else
         throw(ArgumentError("Argument `names` should have length 1 or the length of `chans`"))
     end
-
-    dev.chans = collect(chans)
-    dev.channames = chn
+    
+    dev.chans.physchans = collect(chans)
+    dev.chans.channels = chn
+  
     n = length(chans)
     chanidx = OrderedDict{String,Int}()
     for i in 1:n
         chanidx[chn[i]] = i
     end
-    dev.chanidx = chanidx
-    
+    dev.chans.chanmap = chanidx
 
     return
 end
@@ -630,7 +629,7 @@ end
 ```
 
 """
-function AbstractDAQs.daqstop(dev::DSA3217)
+function DAQCore.daqstop(dev::DSA3217)
 
     tsk = dev.task.task
     if !istaskdone(tsk) && istaskstarted(tsk)
@@ -658,7 +657,7 @@ function readpressure(dev::DSA3217)
     δt = getdaqtime(dev, nsamples)
     
     if iparam(dev, "EU") > 0
-        press = read_eu_press(buf, dev.chans)
+        press = read_eu_press(buf, dev.chans.physchans)
     else
         error("Reading data without engineering units (EU=1) not implemented yet!")
     end
@@ -682,14 +681,14 @@ not been implemented yet.
 
 ## Return value
 
-This function returns a [`AbstractDAQs.MeasData`](@ref) object that contains the data as 
+This function returns a [`DAQCore.MeasData`](@ref) object that contains the data as 
 well as sampling rate and other meta data.
 
 ## Usage
 See example for [`daqstart`](@ref) command. 
 
 """
-function AbstractDAQs.daqread(dev::DSA3217)
+function DAQCore.daqread(dev::DSA3217)
 
     # Check if the reading is continous
     if iparam(dev, "FPS") == 0
@@ -702,9 +701,9 @@ function AbstractDAQs.daqread(dev::DSA3217)
     
     # Get the data:
     P, fs, t = readpressure(dev)
-    unit = dev.params[:UNITSCAN]
-    return MeasData{Matrix{Float32}}(devname(dev), devtype(dev),
-                                     t, fs, P, dev.chanidx)
+    unit = sparam(dev,"UNITSCAN")
+    sampling = DaqSamplingRate(fs, size(P,2), t)
+    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans)
     
 end
 
@@ -716,19 +715,19 @@ Execute a **s**ynchronous data acquisition.
 
 ## Return value
 
-This function returns a [`AbstractDAQs.MeasData`](@ref) object that contains the data as 
+This function returns a [`DAQCore.MeasData`](@ref) object that contains the data as 
 well as sampling rate and other meta data.
 
 ## Usage
 See example for [`DSA3217`](@ref) command. 
 
 """
-function AbstractDAQs.daqacquire(dev::DSA3217)
+function DAQCore.daqacquire(dev::DSA3217)
     scan!(dev)
     P, fs, t = readpressure(dev)
-    unit = dev.params[:UNITSCAN]
-    return MeasData{Matrix{Float32}}(devname(dev), devtype(dev),
-                                     t, fs, P, dev.chanidx)
+    unit = sparam(dev, "UNITSCAN")
+    sampling = DaqSamplingRate(fs, size(P,2), t)
+    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans)
 end
 
 """
@@ -837,9 +836,9 @@ end
 "Number of data acquisition channels"
 numchans(scani::DSA3217) = 16
 "Number of data acquisition channels"
-AbstractDAQs.numchannels(scani::DSA3217) = numchannels(scani.chans)
+DAQCore.numchannels(scani::DSA3217) = numchannels(scani.chans)
 "Name of data acquisition channels"
-AbstractDAQs.daqchannels(scani::DSA3217) = daqchannels(channames)
+DAQCore.daqchannels(scani::DSA3217) = daqchannels(scani.chans)
 
 #socket(scani) = scani.socket
 
@@ -895,7 +894,7 @@ julia> size(p.data)
 ```
 
 """    
-function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
+function DAQCore.daqconfigdev(dev::DSA3217; kw...)
 
     pp = Dict{Symbol, Any}()
     k = keys(kw)
@@ -954,6 +953,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         if unitscan ∈ validunits
             push!(cmds, "SET UNITSCAN $unitscan")
             pp[:UNITSCAN] = unitscan
+            dev.chans.units = unitscan
         else
             throw(DomainError(unitscan, "Invalid unit!"))
         end
@@ -986,9 +986,7 @@ end
 Update configuration from `params` field of `DSA3217` object.
 """
 function updateconf!(dev::DSA3217, p::Dict{Symbol,Any})
-    p = dev.params
-    ipars = dev.conf.ipars
-    spars = dev.conf.spars
+
     k = keys(p)
     :FPS ∈ k && iparam!(dev.conf, "FPS", Int64(p[:FPS]))
     :AVG ∈ k && iparam!(dev.conf, "AVG", Int64(p[:AVG]))
@@ -1010,7 +1008,7 @@ Execute a hardware zero. The time parameter specifies how long the function shou
 before returning.
 
 """
-function AbstractDAQs.daqzero(dev::DSA3217; time=15)
+function DAQCore.daqzero(dev::DSA3217; time=15)
     openscani(dev) do io
         println(io, "CALZ")
         sleep(time)
