@@ -14,15 +14,11 @@ mutable struct DSA3217 <: AbstractScanivalve
     "Data acquisition buffer"
     buffer::CircMatBuffer{UInt8}
     "Data aquisition task handling"
-    task::DAQTask
-    "Index of channels"
-    chans::Vector{Int}
-    "Names of channels"
-    channames::Vector{String}
-    "Map from channel name to channel index"
-    chanidx::OrderedDict{String,Int}
+    task::DaqTask
+    "Channel information"
+    chans::DaqChannels{Vector{Int}}
     "Scanivalve configuration"
-    conf::DAQConfig
+    conf::DaqConfig
     "Use threading"
     usethread::Bool
 end
@@ -202,26 +198,20 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
         println(s, "SET UNITSCAN PA")
         println(s, "SET TIME 1")
     end
-    
-    params = Dict{Symbol,Any}(:FPS=>1, :AVG=>16, :PERIOD=>500, :TIME=>1,:XSCANTRIG=>0, :EU=>1, :UNITSCAN=>"PA")
 
-    ipars = Dict{String,Int}("FPS"=>1, "AVG"=>16, "PERIOD"=>500, "TIME"=>1,
-                             "EU"=>1, "XSCANTRIG"=>0)
-    spars = Dict{String,String}("UNITSCAN"=>"PA")
-    fpars = Dict{String,Float64}()
+    conf = DaqConfig(devname, "DSA3217", ip=ipaddr, port=port, model="3217")
+
+    iparam!(conf, "FPS"=>1, "AVG"=>16, "PERIOD"=>500, "TIME"=>1,
+            "XSCANTRIG"=>0, "EU"=>1)
+    sparam!(conf, "UNITSCAN"=>"PA")
     
-    conf = DAQConfig(ipars, fpars, spars,
-                   devname=devname, ip=ipaddr, model="DSA3217", sn=sn,tag=tag)
-    task = DAQTask()
+    
+    task = DaqTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
-    chn = "P" .* numstring.(1:16)
-    chanidx = OrderedDict{String,Int}()
-    for i in 1:16
-        chanidx[chn[i]] = i
-    end
+    chn = "P" .* numstring.(1:16,2)
+    chans = DaqChannels(devname, "DSA3217", chn, "Pa", 1:16)
     
-    return DSA3217(devname, ip, port, params, buf, task, collect(1:16),
-                   chn, chanidx, conf, usethread)
+    return DSA3217(devname, ip, port, params, buf, task, chans, conf, usethread)
     
      
     
@@ -239,19 +229,14 @@ function daqpacketsize(::Type{DSA3217}, eu=1, time=1)
     end
 end
 
-"""
-`daqparam(dev, param)`
-
-Returns de value configuration parameter `param` (s `Symbol`)
-"""
-daqparam(dev, param) = dev.params[param]
 
 """
 `framesize(dev::DSA3217)`
 
 Return the size of a data acquisition frame. A frame contains a data from all channels.
 """
-framesize(dev::DSA3217) = daqpacketsize(DSA3217, daqparam(dev,:EU), daqparam(dev,:TIME))
+framesize(dev::DSA3217) = daqpacketsize(DSA3217, iparam(dev,"EU"),
+                                        iparam(dev,"TIME"))
 
 
 """
@@ -263,7 +248,7 @@ Calculate the sampling interval calculated from data acquisition paramters:
  * `AVG` Number of frames that are read before averaging.
 
 """                                            
-deltat(dev) = 16*daqparam(dev,:PERIOD)*1e-6 * daqparam(dev,:AVG)
+deltat(dev) = 16*iparam(dev,"PERIOD")*1e-6 * iparam(dev,"AVG")
 
 
 """
@@ -298,7 +283,7 @@ function scan!(dev::DSA3217)
     cleartask!(tsk)
 
     buf = dev.buffer
-    fps = daqparam(dev, :FPS)
+    fps = iparam(dev, "FPS")
     # For long data acquisition, buffer might have to be increased.
     if fps > capacity(buf) 
         resize!(buf, fps)
@@ -672,7 +657,7 @@ function readpressure(dev::DSA3217)
     nsamples = length(buf)
     δt = getdaqtime(dev, nsamples)
     
-    if daqparam(dev, :EU) > 0
+    if iparam(dev, "EU") > 0
         press = read_eu_press(buf, dev.chans)
     else
         error("Reading data without engineering units (EU=1) not implemented yet!")
@@ -707,7 +692,7 @@ See example for [`daqstart`](@ref) command.
 function AbstractDAQs.daqread(dev::DSA3217)
 
     # Check if the reading is continous
-    if daqparam(dev, :FPS) == 0
+    if iparam(dev, "FPS") == 0
         # Stop reading!
         daqstop(dev)
         sleep(0.1)
@@ -782,8 +767,8 @@ function getdaqtime(dev, nfr)
     b = buf[1,1] # Identify the packet
 
     # Sampling time from scan configuration and fallback value
-    δt₀ = daqparam(dev, :AVG) * daqparam(dev, :PERIOD)*1e-6 * 16
-    btype = daqparam(dev, :TIME)
+    δt₀ = iparam(dev, "AVG") * iparam(dev, "PERIOD")*1e-6 * 16
+    btype = iparam(dev, "TIME")
     if b == 0x04 || b == 0x05 || nfr==1 # No time
         # Calculate from scan configuration
         return δt₀
@@ -852,9 +837,9 @@ end
 "Number of data acquisition channels"
 numchans(scani::DSA3217) = 16
 "Number of data acquisition channels"
-AbstractDAQs.numchannels(scani::DSA3217) = length(scani.chans)
+AbstractDAQs.numchannels(scani::DSA3217) = numchannels(scani.chans)
 "Name of data acquisition channels"
-AbstractDAQs.daqchannels(scani::DSA3217) = scani.channames
+AbstractDAQs.daqchannels(scani::DSA3217) = daqchannels(channames)
 
 #socket(scani) = scani.socket
 
@@ -912,23 +897,23 @@ julia> size(p.data)
 """    
 function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
 
+    pp = Dict{Symbol, Any}()
     k = keys(kw)
     cmds = String[]
     if :FPS ∈ k
         fps = kw[:FPS]
         if 0 ≤ fps < 1_000_000
             push!(cmds, "SET FPS $fps")
-            dev.params[:FPS] = fps
+            pp[:FPS] = fps
         else
             throw(DomainError(fps, "FPS outside range (0 - 1000000)"))
         end
     end
-
     if :PERIOD ∈ k
         period = kw[:PERIOD]
         if 125 ≤ period ≤ 65535
             push!(cmds, "SET PERIOD $period")
-            dev.params[:PERIOD] = period
+            pp[:PERIOD] = period
         else
             throw(DomainError(period, "PERIOD outside range (126 - 65535)"))
         end
@@ -938,7 +923,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         avg = kw[:AVG]
         if 1 ≤ avg ≤ 240
             push!(cmds, "SET AVG $avg")
-            dev.params[:AVG] = avg
+            pp[:AVG] = avg
         else
             throw(DomainError(avg, "AVG outside range (1 - 240)"))
         end
@@ -948,7 +933,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         tt = kw[:TIME]
         if 0 ≤ tt ≤ 2
             push!(cmds, "SET TIME $tt")
-            dev.params[:TIME] = tt
+            pp[:TIME] = tt
         else
             throw(DomainError(tt, "TIME outside range (0-2)"))
         end
@@ -958,7 +943,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         eu = kw[:EU]
         if 0 ≤ eu ≤ 1
             push!(cmds, "SET EU $eu")
-            dev.params[:EU] = eu
+            pp[:EU] = eu
         else
             throw(DomainError(eu, "EU outside range (0 or 1)"))
         end
@@ -968,7 +953,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         unitscan = kw[:UNITSCAN]
         if unitscan ∈ validunits
             push!(cmds, "SET UNITSCAN $unitscan")
-            dev.params[:UNITSCAN] = unitscan
+            pp[:UNITSCAN] = unitscan
         else
             throw(DomainError(unitscan, "Invalid unit!"))
         end
@@ -978,7 +963,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         xscantrig = kw[:XSCANTRIG]
         if 0 ≤ eu ≤ 1
             push!(cmds, "SET SCANTRIG $xscantrig")
-            dev.params[:XSCANTRIG] = xscantrig
+            pp[:XSCANTRIG] = xscantrig
         else
             throw(DomainError(xscantrig, "XSCANTRIG should be either 0 or 1"))
         end
@@ -991,7 +976,7 @@ function AbstractDAQs.daqconfigdev(dev::DSA3217; kw...)
         end
 
         # Update conf field:
-        updateconf!(dev::DSA3217)
+        updateconf!(dev::DSA3217, pp)
     end
 end
 
@@ -1000,20 +985,20 @@ end
 
 Update configuration from `params` field of `DSA3217` object.
 """
-function updateconf!(dev::DSA3217)
+function updateconf!(dev::DSA3217, p::Dict{Symbol,Any})
     p = dev.params
     ipars = dev.conf.ipars
     spars = dev.conf.spars
-
-    ipars["FPS"] = p[:FPS]
-    ipars["AVG"] = p[:AVG]
-    ipars["PERIOD"] = p[:PERIOD]
-    ipars["TIME"] = p[:TIME]
-    ipars["XSCANTRIG"] = p[:XSCANTRIG]
-    ipars["EU"] = p[:EU]
-
-    spars["UNITSCAN"] = p[:UNITSCAN]
-
+    k = keys(p)
+    :FPS ∈ k && iparam!(dev.conf, "FPS", Int64(p[:FPS]))
+    :AVG ∈ k && iparam!(dev.conf, "AVG", Int64(p[:AVG]))
+    :PERIOD ∈ k && iparam!(dev.conf, "PERIOD", Int64(p[:PERIOD]))
+    :TIME ∈ k && iparam!(dev.conf, "TIME", Int64(p[:TIME]))
+    :XSCANTRIG ∈ k && iparam!(dev.conf, "XSCANTRIG", Int64(p[:XSCANTRIG]))
+    :EU ∈ k && iparam!(dev.conf, "EU", Int64(p[:EU]))
+    
+    :UNITSCAN ∈ k && sparam!(dev.conf, "UNITSCAN", string(p[:UNITSCAN]))
+    
     return
     
 end
