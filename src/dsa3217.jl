@@ -209,13 +209,28 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DaqTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16,2)
-    chans = DaqChannels(devname, "DSA3217", chn, "PA", collect(1:16))
+    chans = DaqChannels(devname, "DSA3217", chn, "Pa", collect(1:16))
     
     return DSA3217(devname, ip, port, buf, task, chans, conf, usethread)
     
     
 end
 
+const UNIT_TABLE = ["ATM", "BAR", "CMHG", "CMH2O", "DECIBAR", "TORR",
+                    "FTH2O", "GCM2", "INHG", "INH2O", "KGCM2",
+                    "KGM2", "KIPIN2", "KNM2", "KPA", "MBAR",
+                    "MH2O", "MMHG", "MPA", "NCM2", "NM2",
+                    "QZFT2", "QZIN2", "PA", "PSF", "PSI"]
+
+const UNIT_MAP = Dict("ATM"=>"atm", "BAR"=>"bar", "CMHG"=>"cmHg",
+                      "CMH2O"=>"cmH₂O", "DECIBAR"=>"dbar", "TORR"=>"torr",
+                      "FTH2O"=>"ftH₂O", "GCM2"=>"g/cm²", "INHG"=>"inHg",
+                      "INH2O"=>"inH₂O", "KGCM2"=>"kg/cm²","KGM2"=>"kg/m²",
+                      "KIPIN2"=>"kip/in²", "KNM2"=>"kN/m²", "KPA"=>"kPa",
+                      "MBAR"=>"mbar", "MH2O"=>"mH₂O", "MMHG"=>"mmHg",
+                      "MPA"=>"MPa", "NCM2"=>"N/cm²", "NM2"=>"N/m²",
+                      "QZFT2"=>"QZ/ft²", "QZIN2"=>"QZ/in²", "PA"=>"Pa",
+                      "PSF"=>"psf", "PSI"=>"psi")
 
 """
 `daqpacketsize(::Type{DSA3217}, eu=1, time=1)`
@@ -948,17 +963,6 @@ function DAQCore.daqconfigdev(dev::DSA3217; kw...)
         end
     end
 
-    if :UNITSCAN ∈ k # User should check manually if the correct unit was used
-        unitscan = kw[:UNITSCAN]
-        if unitscan ∈ validunits
-            push!(cmds, "SET UNITSCAN $unitscan")
-            pp[:UNITSCAN] = unitscan
-            dev.chans.units = unitscan
-        else
-            throw(DomainError(unitscan, "Invalid unit!"))
-        end
-    end
-
     if :XSCANTRIG ∈ k
         xscantrig = kw[:XSCANTRIG]
         if 0 ≤ eu ≤ 1
@@ -995,8 +999,6 @@ function updateconf!(dev::DSA3217, p::Dict{Symbol,Any})
     :XSCANTRIG ∈ k && iparam!(dev.conf, "XSCANTRIG", Int64(p[:XSCANTRIG]))
     :EU ∈ k && iparam!(dev.conf, "EU", Int64(p[:EU]))
     
-    :UNITSCAN ∈ k && sparam!(dev.conf, "UNITSCAN", string(p[:UNITSCAN]))
-    
     return
     
 end
@@ -1013,6 +1015,28 @@ function DAQCore.daqzero(dev::DSA3217; time=15)
         println(io, "CALZ")
         sleep(time)
     end
+end
+
+
+"""
+`daqunits(dev::DSA3217, unit="PA")`
+
+Set data acquisition pressure units to `unit`.
+Available units are in constant [`UNIT_TABLE`].
+
+"""
+function DAQCore.daqunits(dev::DSA3217, unit="PA")
+    unit = uppercase(unit)
+    # See if unit is valid
+    unit ∉ UNIT_TABLE && error("Unknown unit $unit. Check manual.")
+
+    # Program unit
+    openscani(dev) do sock
+        println(sock, "SET UNIT $unit")
+    end
+    dev.chans.units = UNIT_MAP[unit]
+    sparam!(dev.conf, "UNITSCAN", unit)
+    
 end
 
 """

@@ -4,7 +4,7 @@ using Sockets
 using DAQCore
 
 export DSA3217
-export daqread, daqstart, daqacquire, daqconfig, daqconfigdev
+export daqread, daqstart, daqacquire, daqconfig, daqconfigdev, daqunits
 export daqzero, daqstop, daqaddinput, numchannels, daqchannels
 
 "Base type for Scanivalve pressure scanners"
