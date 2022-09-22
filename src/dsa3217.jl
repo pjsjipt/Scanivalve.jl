@@ -16,7 +16,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     "Channel information"
     chans::DaqChannels{Vector{Int},String}
     "Scanivalve configuration"
-    conf::DaqConfig
+    config::DaqConfig
     "Use threading"
     usethread::Bool
 end
@@ -993,12 +993,12 @@ Update configuration from `params` field of `DSA3217` object.
 function updateconf!(dev::DSA3217, p::Dict{Symbol,Any})
 
     k = keys(p)
-    :FPS ∈ k && iparam!(dev.conf, "FPS", Int64(p[:FPS]))
-    :AVG ∈ k && iparam!(dev.conf, "AVG", Int64(p[:AVG]))
-    :PERIOD ∈ k && iparam!(dev.conf, "PERIOD", Int64(p[:PERIOD]))
-    :TIME ∈ k && iparam!(dev.conf, "TIME", Int64(p[:TIME]))
-    :XSCANTRIG ∈ k && iparam!(dev.conf, "XSCANTRIG", Int64(p[:XSCANTRIG]))
-    :EU ∈ k && iparam!(dev.conf, "EU", Int64(p[:EU]))
+    :FPS ∈ k && iparam!(dev.config, "FPS", Int64(p[:FPS]))
+    :AVG ∈ k && iparam!(dev.config, "AVG", Int64(p[:AVG]))
+    :PERIOD ∈ k && iparam!(dev.config, "PERIOD", Int64(p[:PERIOD]))
+    :TIME ∈ k && iparam!(dev.config, "TIME", Int64(p[:TIME]))
+    :XSCANTRIG ∈ k && iparam!(dev.config, "XSCANTRIG", Int64(p[:XSCANTRIG]))
+    :EU ∈ k && iparam!(dev.config, "EU", Int64(p[:EU]))
     
     return
     
@@ -1036,7 +1036,7 @@ function DAQCore.daqunits(dev::DSA3217, unit="PA")
         println(sock, "SET UNIT $unit")
     end
     dev.chans.units = UNIT_MAP[unit]
-    sparam!(dev.conf, "UNITSCAN", unit)
+    sparam!(dev.config, "UNITSCAN", unit)
     
 end
 
