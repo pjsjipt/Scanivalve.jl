@@ -199,7 +199,7 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
         println(s, "SET TIME 1")
     end
 
-    conf = DaqConfig(devname, "DSA3217", ip=ipaddr, port=port, model="3217", tag=tag,
+    conf = DaqConfig(ip=ipaddr, port=port, model="3217", tag=tag,
                      sn=sn)
 
     iparam!(conf, "FPS"=>1, "AVG"=>16, "PERIOD"=>500, "TIME"=>1,
