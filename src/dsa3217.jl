@@ -966,7 +966,7 @@ function DAQCore.daqconfigdev(dev::DSA3217; kw...)
 
     if :XSCANTRIG ∈ k
         xscantrig = kw[:XSCANTRIG]
-        if 0 ≤ eu ≤ 1
+        if 0 ≤ xscantrig ≤ 1
             push!(cmds, "SET SCANTRIG $xscantrig")
             pp[:XSCANTRIG] = xscantrig
         else
