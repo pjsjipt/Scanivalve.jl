@@ -14,7 +14,7 @@ mutable struct DSA3217 <: AbstractScanivalve
     "Data aquisition task handling"
     task::DaqTask
     "Channel information"
-    chans::DaqChannels{Vector{Int},String}
+    chans::DaqChannels{Vector{Int}}
     "Scanivalve configuration"
     config::DaqConfig
     "Use threading"
@@ -210,7 +210,7 @@ function DSA3217(devname="Scanivalve", ipaddr="191.30.80.131";
     task = DaqTask()
     buf = CircMatBuffer{UInt8}(112, buflen)
     chn = "P" .* numstring.(1:16,2)
-    chans = DaqChannels(devname, "DSA3217", chn, "Pa", collect(1:16))
+    chans = DaqChannels(chn, collect(1:16))
     
     return DSA3217(devname, ip, port, buf, task, chans, conf, usethread)
     
@@ -719,8 +719,9 @@ function DAQCore.daqread(dev::DSA3217)
     P, fs, t = readpressure(dev)
     unit = sparam(dev,"UNITSCAN")
     sampling = DaqSamplingRate(fs, size(P,2), t)
-    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans)
-    
+    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans,
+                    fill(unit, numchannels(dev.chans)))
+                    
 end
 
 """
@@ -739,11 +740,12 @@ See example for [`DSA3217`](@ref) command.
 
 """
 function DAQCore.daqacquire(dev::DSA3217)
-    scan!(dev)
+                    scan!(dev)
     P, fs, t = readpressure(dev)
     unit = sparam(dev, "UNITSCAN")
     sampling = DaqSamplingRate(fs, size(P,2), t)
-    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans)
+    return MeasData(devname(dev), devtype(dev), sampling, P, dev.chans,
+                    fill(unit, numchannels(dev.chans)))
 end
 
 """
@@ -1026,7 +1028,7 @@ Set data acquisition pressure units to `unit`.
 Available units are in constant [`UNIT_TABLE`].
 
 """
-function DAQCore.daqunits(dev::DSA3217, unit="PA")
+function DAQCore.daqunits(dev::DSA3217, unit)
     unit = uppercase(unit)
     # See if unit is valid
     unit ∉ UNIT_TABLE && error("Unknown unit $unit. Check manual.")
@@ -1040,6 +1042,7 @@ function DAQCore.daqunits(dev::DSA3217, unit="PA")
     
 end
 
+DAQCore.daqunits(dev::DSA3217) = sparam(dev.config, "UNITSCAN")
 """
 `readmanylines(dev, cmd, delay=0.5)`
 
